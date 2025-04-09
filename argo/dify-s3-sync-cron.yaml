@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: dify-s3-sync
+spec:
+  schedule: "0 * * * *"  # Every hour
+  concurrencyPolicy: Replace
+  workflowSpec:
+    workflowTemplateRef:
+      name: dify-s3-sync
+    arguments:
+      parameters:
+        - name: host
+          value: "<your-dify-host>"
+        - name: api-key
+          value: "<your-api-key>"
+        - name: dataset-id
+          value: "<your-dataset-id>"
+        - name: s3-bucket
+          value: "<your-s3-bucket>"
+        - name: modified-only
+          value: "false" 

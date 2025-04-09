@@ -1,0 +1,148 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: dify-s3-sync
+spec:
+  entrypoint: sync-docs
+  arguments:
+    parameters:
+      - name: host
+        description: "Dify API host"
+      - name: api-key
+        description: "Dify API key"
+      - name: dataset-id
+        description: "Target dataset ID"
+      - name: s3-bucket
+        description: "S3 bucket name"
+      - name: modified-only
+        description: "Only process files listed in modified_files.txt"
+        default: "false"
+  volumes:
+    - name: rclone
+      configMap:
+        name: rclone-config
+        items:
+          - key: rclone.conf
+            path: rclone.conf
+    - name: workspace
+      persistentVolumeClaim:
+        claimName: dify-s3-sync
+  templates:
+    - name: sync-docs
+      steps:
+        - - name: pull-scripts
+            template: pull-scripts
+        - - name: sync-s3-files
+            template: sync-s3-files
+            arguments:
+              parameters:
+                - name: modified-only
+                  value: "{{workflow.parameters.modified-only}}"
+                - name: s3-bucket
+                  value: "{{workflow.parameters.s3-bucket}}"
+        - - name: fetch-dify-docs
+            template: fetch-dify-docs
+            arguments:
+              parameters:
+                - name: host
+                  value: "{{workflow.parameters.host}}"
+                - name: api-key
+                  value: "{{workflow.parameters.api-key}}"
+                - name: dataset-id
+                  value: "{{workflow.parameters.dataset-id}}"
+        - - name: process-files
+            template: process-files
+            arguments:
+              parameters:
+                - name: host
+                  value: "{{workflow.parameters.host}}"
+                - name: api-key
+                  value: "{{workflow.parameters.api-key}}"
+                - name: dataset-id
+                  value: "{{workflow.parameters.dataset-id}}"
+                - name: modified-only
+                  value: "{{workflow.parameters.modified-only}}"
+
+    - name: pull-scripts
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh, -c]
+        args:
+          - |
+            set -ex
+            git clone https://github.com/t9k/dify-workflow.git /tmp/repo
+            mkdir -p /workspace/scripts
+            cp -v /tmp/repo/argo/*.sh /workspace/scripts/
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+
+    - name: sync-s3-files
+      inputs:
+        parameters:
+          - name: modified-only
+          - name: s3-bucket
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh]
+        args:
+          - -c
+          - |
+            set -ex
+            chmod +x /workspace/scripts/sync_s3_files.sh
+            export MODIFIED_ONLY="{{inputs.parameters.modified-only}}"
+            export S3_BUCKET="{{inputs.parameters.s3-bucket}}"
+            /workspace/scripts/sync_s3_files.sh
+        volumeMounts:
+          - name: rclone
+            mountPath: /s3cfg
+          - name: workspace
+            mountPath: /workspace
+
+    - name: fetch-dify-docs
+      inputs:
+        parameters:
+          - name: host
+          - name: api-key
+          - name: dataset-id
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh]
+        args:
+          - -c
+          - |
+            set -ex
+            chmod +x /workspace/scripts/fetch_dify_docs.sh
+            export HOST="{{inputs.parameters.host}}"
+            export API_KEY="{{inputs.parameters.api-key}}"
+            export DATASET_ID="{{inputs.parameters.dataset-id}}"
+            /workspace/scripts/fetch_dify_docs.sh
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+
+    - name: process-files
+      inputs:
+        parameters:
+          - name: host
+          - name: api-key
+          - name: dataset-id
+          - name: modified-only
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh]
+        args:
+          - -c
+          - |
+            set -ex
+            chmod +x /workspace/scripts/process_files.sh
+            export HOST="{{inputs.parameters.host}}"
+            export API_KEY="{{inputs.parameters.api-key}}"
+            export DATASET_ID="{{inputs.parameters.dataset-id}}"
+            export MODIFIED_ONLY="{{inputs.parameters.modified-only}}"
+            /workspace/scripts/process_files.sh
+        volumeMounts:
+          - name: rclone
+            mountPath: /s3cfg
+          - name: workspace
+            mountPath: /workspace
