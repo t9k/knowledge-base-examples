@@ -9,7 +9,7 @@
 - 监控 S3 存储桶中的文档变更
 - 支持多种文档格式（txt、pdf、md、doc、docx）
 - 自动在 Dify 知识库中创建、更新或删除文档
-- 可配置是否只处理最近修改的文件
+- 可配置是否处理全部文件或仅处理新建和修改的文件
 - 可配置运行计划（默认：每天下午3点）
 - 蓝绿部署模式，维护两个独立环境并交替升级，实现零停机升级和快速回滚
 
@@ -22,7 +22,7 @@
 - `dataset-id-blue`：蓝色环境使用的 Dify 知识库 ID（必填）
 - `dataset-id-green`：绿色环境使用的 Dify 知识库 ID（必填）
 - `s3-bucket`：S3 存储桶名称（必填）
-- `modified-only`：是否只处理修改时间发生变化的文件（默认："false"）
+- `alway-push-all-files`：是否处理所有文件而不只是新建和修改的文件（默认："true"）
 
 ## 目录结构
 
@@ -39,11 +39,15 @@
 │   └── sync_s3_files.sh
 ├── blue/                 # 蓝色环境
 │   ├── dify_docs.json
+│   ├── created_files.txt
 │   ├── modified_files.txt
+│   ├── deleted_files.txt
 │   └── s3_files.txt
 ├── green/                # 绿色环境
 │   ├── dify_docs.json
+│   ├── created_files.txt
 │   ├── modified_files.txt
+│   ├── deleted_files.txt
 │   └── s3_files.txt
 └── flag.txt              # 记录当前活动环境（blue 或 green）
 ```
@@ -78,7 +82,7 @@ argo submit -n argo --from cronworkflow/dify-s3-sync dify-s3-sync-template.yaml 
   --parameter dataset-id-blue=<your-blue-dataset-id> \
   --parameter dataset-id-green=<your-green-dataset-id> \
   --parameter s3-bucket=<your-s3-bucket> \
-  --parameter modified-only=false
+  --parameter alway-push-all-files=true
 ```
 
 ## 工作流程
@@ -90,25 +94,31 @@ argo submit -n argo --from cronworkflow/dify-s3-sync dify-s3-sync-template.yaml 
 
 2. `pull-scripts`：从 GitHub 拉取脚本并存储到共享脚本目录
 
-3. `sync-s3-files`：从 S3 存储桶获取文件
-    - 始终同步所有文件到共享的 `/workspace/files/` 目录
-    - 创建活动环境的 `s3_files.txt` 记录所有文件以及修改时间
-    - 创建活动环境的 `modified_files.txt` 记录修改时间发生变化的文件
-
-4. `fetch-dify-docs`：从 Dify 获取当前活动环境的文档列表
+3. `fetch-dify-docs`：从 Dify 获取当前活动环境的文档列表
     - 根据当前活动环境选择正确的数据集 ID
     - 创建活动环境的 `dify_docs.json` 记录知识库的文档列表
 
+4. `sync-s3-files`：从 S3 存储桶获取文件
+    - 始终同步所有文件到共享的 `/workspace/files/` 目录
+    - 创建活动环境的 `s3_files.txt` 记录所有文件以及修改时间
+    - 创建活动环境的 `created_files.txt` 记录新建的文件
+    - 创建活动环境的 `modified_files.txt` 记录修改的文件
+    - 创建活动环境的 `deleted_files.txt` 记录已删除的文件
+    - 比较活动环境的 s3_files.txt 与 dify_docs.json 文件列表是否一致，如有不一致则打印警告
+
 5. `process-files`：处理文件并与当前活动环境的 Dify 数据集同步
-    - 比照活动环境的 `dify_docs.json` 和 `s3_files.txt`，删除 S3 中已不存在的文档
-    - 比照活动环境的 `dify_docs.json` 和 `s3_files.txt`（当 `modified-only` 为 `false`，或 `modified_files.txt`，当 `modified-only` 为 `true`）：
-        - 为新文件创建新文档
-        - 更新已修改文件的现有文档
+    - 根据活动环境的 `deleted_files.txt` 删除 Dify 中对应的文档
+    - 根据 `alway-push-all-files` 参数决定处理的文件范围：
+        - 当为 `true` 时，处理所有文件 (`s3_files.txt`)
+        - 当为 `false` 时，仅处理新建和修改的文件 (`created_files.txt` 和 `modified_files.txt`)
+    - 对每个需要处理的文件：
+        - 如果文件是新建的，在 Dify 中创建新文档
+        - 如果文件是修改的，更新 Dify 中的现有文档
 
 ## 回滚说明
 
 如果版本升级后出现问题（假设最近一次切换到绿色环境）：
 
-1. 将 `/workspace/flag.txt` 的值改为 `blue`，回滚到蓝色环境；
+1. 手动将 `/workspace/flag.txt` 的值改为 `blue`，回滚到蓝色环境；
 2. 检查、修复绿色环境的问题；
-3. 将 `/workspace/flag.txt` 的值改为 `green`，再次升级到绿色环境。
+3. 手动或使用工作流将 `/workspace/flag.txt` 的值改为 `green`，再次升级到绿色环境。

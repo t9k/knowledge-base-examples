@@ -7,7 +7,7 @@
 - 监控 S3 存储桶中的文档变更
 - 支持多种文档格式（txt、pdf、md、doc、docx）
 - 自动在 Dify 知识库中创建、更新或删除文档
-- 可配置是否只处理最近修改的文件
+- 可配置是否处理全部文件或仅处理新建和修改的文件
 - 可配置运行计划（默认：每小时）
 
 ## 配置说明
@@ -18,7 +18,7 @@
 - `api-key`：Dify API 密钥（必填）
 - `dataset-id`：Dify 知识库的 ID（必填）
 - `s3-bucket`：S3 存储桶名称（必填）
-- `modified-only`：是否只处理修改时间发生变化的文件（默认："false"）
+- `alway-push-all-files`：是否处理所有文件而不只是新建和修改的文件（默认："true"）
 
 ## 使用方法
 
@@ -49,23 +49,28 @@ argo submit -n argo --from cronworkflow/dify-s3-sync dify-s3-sync-template.yaml 
   --parameter api-key=<your-api-key> \
   --parameter dataset-id=<your-dataset-id> \
   --parameter s3-bucket=<your-s3-bucket> \
-  --parameter modified-only=false
+  --parameter alway-push-all-files=true
 ```
 
 ## 工作流程
 
 1. `pull-scripts`：从 GitHub 拉取步骤 2.3.4. 的脚本
 
-2. `sync-s3-files`：从 S3 存储桶获取文件
-    - 始终同步所有文件到 `/workspace/files/` 目录
-    - 创建 `/workspace/s3_files.txt` 记录所有文件以及修改时间
-    - 创建 `/workspace/modified_files.txt` 记录修改时间和上一次发生变化的文件
-
-3. `fetch-dify-docs`：从 Dify 获取现有文档列表
+2. `fetch-dify-docs`：从 Dify 获取现有文档列表
     - 创建 `/workspace/dify_docs.json` 记录知识库的文档列表
 
+3. `sync-s3-files`：从 S3 存储桶获取文件
+    - 始终同步所有文件到 `/workspace/files/` 目录
+    - 创建 `/workspace/s3_files.txt` 记录所有文件以及修改时间
+    - 创建 `/workspace/created_files.txt` 记录新建的文件
+    - 创建 `/workspace/modified_files.txt` 记录修改的文件
+    - 创建 `/workspace/deleted_files.txt` 记录已删除的文件
+
 4. `process-files`：处理文件并与 Dify 同步
-    - 比照 `dify_docs.json` 和 `s3_files.txt`，删除 S3 中已不存在的文档
-    - 比照 `dify_docs.json` 和 `s3_files.txt`（当 `modified-only` 为 `false`，或 `modified_files.txt`，当 `modified-only` 为 `true`）：
-        - 为新文件创建新文档
-        - 更新已修改文件的现有文档
+    - 根据 `deleted_files.txt` 删除 Dify 中对应的文档
+    - 根据 `alway-push-all-files` 参数决定处理的文件范围：
+        - 当为 `true` 时，处理所有文件 (`s3_files.txt`)
+        - 当为 `false` 时，仅处理新建和修改的文件 (`created_files.txt` 和 `modified_files.txt`)
+    - 对每个需要处理的文件：
+        - 如果文件是新建的，在 Dify 中创建新文档
+        - 如果文件是修改的，更新 Dify 中的现有文档

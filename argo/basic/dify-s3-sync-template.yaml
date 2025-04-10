@@ -14,8 +14,8 @@ spec:
         description: "Target dataset ID"
       - name: s3-bucket
         description: "S3 bucket name"
-      - name: modified-only
-        description: "Only process files listed in modified_files.txt"
+      - name: alway-push-all-files
+        description: "Process all files instead of only modified and created files"
         default: "false"
   volumes:
     - name: rclone
@@ -32,14 +32,6 @@ spec:
       steps:
         - - name: pull-scripts
             template: pull-scripts
-        - - name: sync-s3-files
-            template: sync-s3-files
-            arguments:
-              parameters:
-                - name: modified-only
-                  value: "{{workflow.parameters.modified-only}}"
-                - name: s3-bucket
-                  value: "{{workflow.parameters.s3-bucket}}"
         - - name: fetch-dify-docs
             template: fetch-dify-docs
             arguments:
@@ -50,6 +42,14 @@ spec:
                   value: "{{workflow.parameters.api-key}}"
                 - name: dataset-id
                   value: "{{workflow.parameters.dataset-id}}"
+        - - name: sync-s3-files
+            template: sync-s3-files
+            arguments:
+              parameters:
+                - name: alway-push-all-files
+                  value: "{{workflow.parameters.alway-push-all-files}}"
+                - name: s3-bucket
+                  value: "{{workflow.parameters.s3-bucket}}"
         - - name: process-files
             template: process-files
             arguments:
@@ -60,8 +60,8 @@ spec:
                   value: "{{workflow.parameters.api-key}}"
                 - name: dataset-id
                   value: "{{workflow.parameters.dataset-id}}"
-                - name: modified-only
-                  value: "{{workflow.parameters.modified-only}}"
+                - name: alway-push-all-files
+                  value: "{{workflow.parameters.alway-push-all-files}}"
 
     - name: pull-scripts
       container:
@@ -80,7 +80,7 @@ spec:
     - name: sync-s3-files
       inputs:
         parameters:
-          - name: modified-only
+          - name: alway-push-all-files
           - name: s3-bucket
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
@@ -90,7 +90,7 @@ spec:
           - |
             set -ex
             chmod +x /workspace/scripts/sync_s3_files.sh
-            export MODIFIED_ONLY="{{inputs.parameters.modified-only}}"
+            export ALWAY_PUSH_ALL_FILES="{{inputs.parameters.alway-push-all-files}}"
             export S3_BUCKET="{{inputs.parameters.s3-bucket}}"
             /workspace/scripts/sync_s3_files.sh
         volumeMounts:
@@ -127,7 +127,7 @@ spec:
           - name: host
           - name: api-key
           - name: dataset-id
-          - name: modified-only
+          - name: alway-push-all-files
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
         command: [sh]
@@ -139,7 +139,7 @@ spec:
             export HOST="{{inputs.parameters.host}}"
             export API_KEY="{{inputs.parameters.api-key}}"
             export DATASET_ID="{{inputs.parameters.dataset-id}}"
-            export MODIFIED_ONLY="{{inputs.parameters.modified-only}}"
+            export ALWAY_PUSH_ALL_FILES="{{inputs.parameters.alway-push-all-files}}"
             /workspace/scripts/process_files.sh
         volumeMounts:
           - name: rclone

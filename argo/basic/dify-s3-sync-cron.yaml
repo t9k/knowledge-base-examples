@@ -18,5 +18,5 @@ spec:
           value: "<your-dataset-id>"
         - name: s3-bucket
           value: "<your-s3-bucket>"
-        - name: modified-only
-          value: "false" 
+        - name: alway-push-all-files
+          value: "true" 
