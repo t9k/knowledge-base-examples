@@ -84,9 +84,8 @@ spec:
           - name: s3-bucket
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
-        command: [sh]
+        command: [sh, -c]
         args:
-          - -c
           - |
             set -ex
             chmod +x /workspace/scripts/sync_s3_files.sh
@@ -107,9 +106,8 @@ spec:
           - name: dataset-id
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
-        command: [sh]
+        command: [sh, -c]
         args:
-          - -c
           - |
             set -ex
             chmod +x /workspace/scripts/fetch_dify_docs.sh
@@ -130,9 +128,8 @@ spec:
           - name: alway-push-all-files
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
-        command: [sh]
+        command: [sh, -c]
         args:
-          - -c
           - |
             set -ex
             chmod +x /workspace/scripts/process_files.sh

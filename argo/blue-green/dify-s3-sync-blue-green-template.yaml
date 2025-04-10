@@ -98,24 +98,8 @@ spec:
         args:
           - |
             set -ex
-            mkdir -p /workspace/blue /workspace/green
-            
-            # Check if flag file exists
-            if [ -f /workspace/flag.txt ]; then
-              CURRENT=$(cat /workspace/flag.txt)
-              # Toggle between blue and green
-              if [ "$CURRENT" = "blue" ]; then
-                echo "green" > /workspace/flag.txt
-                echo "green"
-              else
-                echo "blue" > /workspace/flag.txt
-                echo "blue"
-              fi
-            else
-              # Default to blue for first run
-              echo "blue" > /workspace/flag.txt
-              echo "blue"
-            fi
+            chmod +x /workspace/scripts/determine-active-env.sh
+            /workspace/scripts/determine-active-env.sh
         volumeMounts:
           - name: workspace
             mountPath: /workspace
@@ -128,9 +112,8 @@ spec:
           - name: active-env
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
-        command: [sh]
+        command: [sh, -c]
         args:
-          - -c
           - |
             set -ex
             ACTIVE_ENV="{{inputs.parameters.active-env}}"
@@ -157,9 +140,8 @@ spec:
           - name: active-env
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
-        command: [sh]
+        command: [sh, -c]
         args:
-          - -c
           - |
             set -ex
             ACTIVE_ENV="{{inputs.parameters.active-env}}"
@@ -192,9 +174,8 @@ spec:
           - name: active-env
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
-        command: [sh]
+        command: [sh, -c]
         args:
-          - -c
           - |
             set -ex
             ACTIVE_ENV="{{inputs.parameters.active-env}}"
