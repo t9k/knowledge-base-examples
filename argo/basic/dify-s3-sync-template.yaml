@@ -42,7 +42,7 @@ spec:
                   value: "{{workflow.parameters.api-key}}"
                 - name: dataset-id
                   value: "{{workflow.parameters.dataset-id}}"
-        - - name: sync-s3-files
+          - name: sync-s3-files
             template: sync-s3-files
             arguments:
               parameters:

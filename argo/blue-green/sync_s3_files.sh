@@ -90,29 +90,6 @@ else
   echo "Added $(wc -l < ${WORKSPACE_DIR}/created_files.txt) files to created_files.txt"
 fi
 
-# Compare old s3_files.txt with dify_docs.json file list
-if [ -f ${WORKSPACE_DIR}/s3_files.txt ] && [ -f ${WORKSPACE_DIR}/dify_docs.json ]; then
-  echo "Comparing s3_files.txt with dify_docs.json..."
-  
-  # Create temporary files with just the filenames for comparison
-  grep -v "^$" ${WORKSPACE_DIR}/s3_files.txt | awk '{print $1}' | sort > ${WORKSPACE_DIR}/s3_files_names.tmp
-  cat ${WORKSPACE_DIR}/dify_docs.json | jq -r '.data[].name' | sort > ${WORKSPACE_DIR}/dify_docs_names.tmp
-  
-  # Check if files are missing in either list
-  if ! diff -q ${WORKSPACE_DIR}/s3_files_names.tmp ${WORKSPACE_DIR}/dify_docs_names.tmp > /dev/null; then
-    echo "WARNING: Inconsistency found between s3_files.txt and dify_docs.json"
-    echo "Files in s3 but not in Dify:"
-    comm -23 ${WORKSPACE_DIR}/s3_files_names.tmp ${WORKSPACE_DIR}/dify_docs_names.tmp
-    echo "Files in Dify but not in s3:"
-    comm -13 ${WORKSPACE_DIR}/s3_files_names.tmp ${WORKSPACE_DIR}/dify_docs_names.tmp
-  else
-    echo "s3_files.txt and dify_docs.json are consistent"
-  fi
-  
-  # Clean up temporary files
-  rm -f ${WORKSPACE_DIR}/s3_files_names.tmp ${WORKSPACE_DIR}/dify_docs_names.tmp
-fi
-
 # Move new s3_files.txt into place
 mv ${WORKSPACE_DIR}/s3_files.txt.new ${WORKSPACE_DIR}/s3_files.txt
 

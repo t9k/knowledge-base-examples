@@ -92,21 +92,20 @@ argo submit -n argo --from cronworkflow/dify-s3-sync dify-s3-sync-template.yaml 
     - 自动切换到另一个环境（蓝→绿→蓝→绿循环）
     - 第一次运行默认使用蓝色环境
 
-2. `pull-scripts`：从 GitHub 拉取脚本并存储到共享脚本目录
+2. `pull-scripts`：从 GitHub 拉取后续步骤的脚本并存储到共享脚本目录
 
-3. `fetch-dify-docs`：从 Dify 获取当前活动环境的文档列表
-    - 根据当前活动环境选择正确的数据集 ID
-    - 创建活动环境的 `dify_docs.json` 记录知识库的文档列表
+3. 并行步骤：
+    - `fetch-dify-docs`：从 Dify 获取当前活动环境的文档列表
+        - 根据当前活动环境选择正确的数据集 ID
+        - 创建活动环境的 `dify_docs.json` 记录知识库的文档列表
+    - `sync-s3-files`：从 S3 存储桶获取文件
+        - 始终同步所有文件到共享的 `/workspace/files/` 目录
+        - 创建活动环境的 `s3_files.txt` 记录所有文件以及修改时间
+        - 创建活动环境的 `created_files.txt` 记录新建的文件
+        - 创建活动环境的 `modified_files.txt` 记录修改的文件
+        - 创建活动环境的 `deleted_files.txt` 记录已删除的文件
 
-4. `sync-s3-files`：从 S3 存储桶获取文件
-    - 始终同步所有文件到共享的 `/workspace/files/` 目录
-    - 创建活动环境的 `s3_files.txt` 记录所有文件以及修改时间
-    - 创建活动环境的 `created_files.txt` 记录新建的文件
-    - 创建活动环境的 `modified_files.txt` 记录修改的文件
-    - 创建活动环境的 `deleted_files.txt` 记录已删除的文件
-    - 比较活动环境的 s3_files.txt 与 dify_docs.json 文件列表是否一致，如有不一致则打印警告
-
-5. `process-files`：处理文件并与当前活动环境的 Dify 数据集同步
+4. `process-files`：处理文件并与当前活动环境的 Dify 数据集同步
     - 根据活动环境的 `deleted_files.txt` 删除 Dify 中对应的文档
     - 根据 `alway-push-all-files` 参数决定处理的文件范围：
         - 当为 `true` 时，处理所有文件 (`s3_files.txt`)
