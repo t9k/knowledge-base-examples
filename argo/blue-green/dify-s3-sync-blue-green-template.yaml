@@ -1,0 +1,220 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: dify-s3-sync-blue-green
+spec:
+  entrypoint: sync-docs
+  arguments:
+    parameters:
+      - name: host
+        description: "Dify API host"
+      - name: api-key
+        description: "Dify API key"
+      - name: dataset-id-blue
+        description: "Blue dataset ID"
+      - name: dataset-id-green
+        description: "Green dataset ID"
+      - name: s3-bucket
+        description: "S3 bucket name"
+      - name: modified-only
+        description: "Only process files listed in modified_files.txt"
+        default: "false"
+  volumes:
+    - name: rclone
+      configMap:
+        name: rclone-config
+        items:
+          - key: rclone.conf
+            path: rclone.conf
+    - name: workspace
+      persistentVolumeClaim:
+        claimName: dify-s3-sync
+  templates:
+    - name: sync-docs
+      steps:
+        - - name: pull-scripts
+            template: pull-scripts
+        - - name: determine-active-env
+            template: determine-active-env
+        - - name: sync-s3-files
+            template: sync-s3-files
+            arguments:
+              parameters:
+                - name: modified-only
+                  value: "{{workflow.parameters.modified-only}}"
+                - name: s3-bucket
+                  value: "{{workflow.parameters.s3-bucket}}"
+                - name: active-env
+                  value: "{{steps.determine-active-env.outputs.result}}"
+        - - name: fetch-dify-docs
+            template: fetch-dify-docs
+            arguments:
+              parameters:
+                - name: host
+                  value: "{{workflow.parameters.host}}"
+                - name: api-key
+                  value: "{{workflow.parameters.api-key}}"
+                - name: dataset-id-blue
+                  value: "{{workflow.parameters.dataset-id-blue}}"
+                - name: dataset-id-green
+                  value: "{{workflow.parameters.dataset-id-green}}"
+                - name: active-env
+                  value: "{{steps.determine-active-env.outputs.result}}"
+        - - name: process-files
+            template: process-files
+            arguments:
+              parameters:
+                - name: host
+                  value: "{{workflow.parameters.host}}"
+                - name: api-key
+                  value: "{{workflow.parameters.api-key}}"
+                - name: dataset-id-blue
+                  value: "{{workflow.parameters.dataset-id-blue}}"
+                - name: dataset-id-green
+                  value: "{{workflow.parameters.dataset-id-green}}"
+                - name: modified-only
+                  value: "{{workflow.parameters.modified-only}}"
+                - name: active-env
+                  value: "{{steps.determine-active-env.outputs.result}}"
+
+    - name: determine-active-env
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh, -c]
+        args:
+          - |
+            set -ex
+            mkdir -p /workspace/blue /workspace/green
+            
+            # Check if flag file exists
+            if [ -f /workspace/flag.txt ]; then
+              CURRENT=$(cat /workspace/flag.txt)
+              # Toggle between blue and green
+              if [ "$CURRENT" = "blue" ]; then
+                echo "green" > /workspace/flag.txt
+                echo "green"
+              else
+                echo "blue" > /workspace/flag.txt
+                echo "blue"
+              fi
+            else
+              # Default to blue for first run
+              echo "blue" > /workspace/flag.txt
+              echo "blue"
+            fi
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+
+    - name: pull-scripts
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh, -c]
+        args:
+          - |
+            set -ex
+            git clone https://github.com/t9k/dify-workflow.git /tmp/repo
+            mkdir -p /workspace/scripts
+            cp -v /tmp/repo/argo/blue-green/*.sh /workspace/scripts/
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+
+    - name: sync-s3-files
+      inputs:
+        parameters:
+          - name: modified-only
+          - name: s3-bucket
+          - name: active-env
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh]
+        args:
+          - -c
+          - |
+            set -ex
+            ACTIVE_ENV="{{inputs.parameters.active-env}}"
+            mkdir -p /workspace/$ACTIVE_ENV
+            chmod +x /workspace/scripts/sync_s3_files.sh
+            export MODIFIED_ONLY="{{inputs.parameters.modified-only}}"
+            export S3_BUCKET="{{inputs.parameters.s3-bucket}}"
+            export WORKSPACE_DIR="/workspace/$ACTIVE_ENV"
+            cd /workspace/$ACTIVE_ENV
+            /workspace/scripts/sync_s3_files.sh
+        volumeMounts:
+          - name: rclone
+            mountPath: /s3cfg
+          - name: workspace
+            mountPath: /workspace
+
+    - name: fetch-dify-docs
+      inputs:
+        parameters:
+          - name: host
+          - name: api-key
+          - name: dataset-id-blue
+          - name: dataset-id-green
+          - name: active-env
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh]
+        args:
+          - -c
+          - |
+            set -ex
+            ACTIVE_ENV="{{inputs.parameters.active-env}}"
+            mkdir -p /workspace/$ACTIVE_ENV
+            chmod +x /workspace/scripts/fetch_dify_docs.sh
+            export HOST="{{inputs.parameters.host}}"
+            export API_KEY="{{inputs.parameters.api-key}}"
+            
+            if [ "$ACTIVE_ENV" = "blue" ]; then
+              export DATASET_ID="{{inputs.parameters.dataset-id-blue}}"
+            else
+              export DATASET_ID="{{inputs.parameters.dataset-id-green}}"
+            fi
+            
+            export WORKSPACE_DIR="/workspace/$ACTIVE_ENV"
+            cd /workspace/$ACTIVE_ENV
+            /workspace/scripts/fetch_dify_docs.sh
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+
+    - name: process-files
+      inputs:
+        parameters:
+          - name: host
+          - name: api-key
+          - name: dataset-id-blue
+          - name: dataset-id-green
+          - name: modified-only
+          - name: active-env
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh]
+        args:
+          - -c
+          - |
+            set -ex
+            ACTIVE_ENV="{{inputs.parameters.active-env}}"
+            mkdir -p /workspace/$ACTIVE_ENV
+            chmod +x /workspace/scripts/process_files.sh
+            export HOST="{{inputs.parameters.host}}"
+            export API_KEY="{{inputs.parameters.api-key}}"
+            
+            if [ "$ACTIVE_ENV" = "blue" ]; then
+              export DATASET_ID="{{inputs.parameters.dataset-id-blue}}"
+            else
+              export DATASET_ID="{{inputs.parameters.dataset-id-green}}"
+            fi
+            
+            export MODIFIED_ONLY="{{inputs.parameters.modified-only}}"
+            export WORKSPACE_DIR="/workspace/$ACTIVE_ENV"
+            cd /workspace/$ACTIVE_ENV
+            /workspace/scripts/process_files.sh
+        volumeMounts:
+          - name: rclone
+            mountPath: /s3cfg
+          - name: workspace
+            mountPath: /workspace

@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: dify-s3-sync-blue-green
+spec:
+  schedule: "0 15 * * *"  # Every day at 3pm
+  concurrencyPolicy: Replace
+  workflowSpec:
+    workflowTemplateRef:
+      name: dify-s3-sync
+    arguments:
+      parameters:
+        - name: host
+          value: "<your-dify-host>"
+        - name: api-key
+          value: "<your-api-key>"
+        - name: dataset-id-blue
+          value: "<your-blue-dataset-id>"
+        - name: dataset-id-green
+          value: "<your-green-dataset-id>"
+        - name: s3-bucket
+          value: "<your-s3-bucket>"
+        - name: modified-only
+          value: "false" 
