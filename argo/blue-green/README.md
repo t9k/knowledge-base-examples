@@ -87,37 +87,40 @@ argo submit -n argo --from cronworkflow/dify-s3-sync dify-s3-sync-template.yaml 
 
 ## 工作流程
 
-1. `determine-active-env`：确定当前活动环境
-    - 检查 `/workspace/flag.txt` 确定当前激活的环境（蓝或绿）
-    - 自动切换到另一个环境（蓝→绿→蓝→绿循环）
-    - 第一次运行默认使用蓝色环境
+1. `prepare`：准备工作
+    - 从 GitHub 拉取后续步骤的脚本并存储到共享脚本目录
+    - 检查 `/workspace/flag.txt` 的内容（上一次的活动环境）：
+        - 若为 `blue`，则修改为 `green`，确定绿色为当前活动环境
+        - 若不为 `blue`，或文件不存在，则修改为 `blue`，确定蓝色为当前活动环境
 
-2. `pull-scripts`：从 GitHub 拉取后续步骤的脚本并存储到共享脚本目录
+2. 并行步骤：
 
-3. 并行步骤：
-    - `fetch-dify-docs`：从 Dify 获取当前活动环境的文档列表
-        - 根据当前活动环境选择正确的数据集 ID
-        - 创建活动环境的 `dify_docs.json` 记录知识库的文档列表
+    - `fetch-dify-docs`：获取 Dify 知识库文档列表
+        - 选择当前活动环境对应的数据集 ID
+        - 创建活动环境的 `dify_docs.json` 记录文档列表
+
     - `sync-s3-files`：从 S3 存储桶获取文件
         - 始终同步所有文件到共享的 `/workspace/files/` 目录
-        - 创建活动环境的 `s3_files.txt` 记录所有文件以及修改时间
+        - 创建活动环境的 `s3_files.txt` 记录文件列表，包含文件名和修改时间
         - 创建活动环境的 `created_files.txt` 记录新建的文件
         - 创建活动环境的 `modified_files.txt` 记录修改的文件
-        - 创建活动环境的 `deleted_files.txt` 记录已删除的文件
+        - 创建活动环境的 `deleted_files.txt` 记录删除的文件
 
-4. `process-files`：处理文件并与当前活动环境的 Dify 数据集同步
-    - 根据活动环境的 `deleted_files.txt` 删除 Dify 中对应的文档
-    - 根据 `alway-push-all-files` 参数决定处理的文件范围：
-        - 当为 `true` 时，处理所有文件 (`s3_files.txt`)
-        - 当为 `false` 时，仅处理新建和修改的文件 (`created_files.txt` 和 `modified_files.txt`)
-    - 对每个需要处理的文件：
-        - 如果文件是新建的，在 Dify 中创建新文档
-        - 如果文件是修改的，更新 Dify 中的现有文档
+3. `update-dify-knowledge-base`：更新当前活动环境对应的 Dify 知识库
+   
+    - 对于每个要删除的文件 (`deleted_files.txt`)，如果文件存在于文档列表中，则删除该文档
+
+    - 根据 `alway-push-all-files` 参数决定上传的文件：
+        - 若为 `true`，上传文件列表 (`s3_files.txt`) 中的所有文件
+        - 若为 `false`，仅上传要新建和修改的文件 (`created_files.txt` 和 `modified_files.txt`)
+        - 对每个上传的文件：
+            - 如果文件存在于文档列表中，则更新该文档
+            - 如果文件不存在于文档列表中，则创建文档
 
 ## 回滚说明
 
-如果版本升级后出现问题（假设最近一次切换到绿色环境）：
+如果版本升级后出现问题（假设最近一次升级到绿色环境）：
 
-1. 手动将 `/workspace/flag.txt` 的值改为 `blue`，回滚到蓝色环境；
+1. 将应用路由切换到蓝色环境，将 `/workspace/flag.txt` 的值改为 `blue`；
 2. 检查、修复绿色环境的问题；
-3. 手动或使用工作流将 `/workspace/flag.txt` 的值改为 `green`，再次升级到绿色环境。
+3. 将应用路由切换到绿色环境，将 `/workspace/flag.txt` 的值改为 `green`。

@@ -32,10 +32,8 @@ spec:
   templates:
     - name: sync-docs
       steps:
-        - - name: pull-scripts
-            template: pull-scripts
-        - - name: determine-active-env
-            template: determine-active-env
+        - - name: prepare
+            template: prepare
         - - name: fetch-dify-docs
             template: fetch-dify-docs
             arguments:
@@ -49,7 +47,7 @@ spec:
                 - name: dataset-id-green
                   value: "{{workflow.parameters.dataset-id-green}}"
                 - name: active-env
-                  value: "{{steps.determine-active-env.outputs.result}}"
+                  value: "{{steps.prepare.outputs.result}}"
           - name: sync-s3-files
             template: sync-s3-files
             arguments:
@@ -59,9 +57,9 @@ spec:
                 - name: s3-bucket
                   value: "{{workflow.parameters.s3-bucket}}"
                 - name: active-env
-                  value: "{{steps.determine-active-env.outputs.result}}"
-        - - name: process-files
-            template: process-files
+                  value: "{{steps.prepare.outputs.result}}"
+        - - name: update-dify-knowledge-base
+            template: update-dify-knowledge-base
             arguments:
               parameters:
                 - name: host
@@ -75,31 +73,23 @@ spec:
                 - name: alway-push-all-files
                   value: "{{workflow.parameters.alway-push-all-files}}"
                 - name: active-env
-                  value: "{{steps.determine-active-env.outputs.result}}"
+                  value: "{{steps.prepare.outputs.result}}"
 
-    - name: pull-scripts
+    - name: prepare
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
         command: [sh, -c]
         args:
           - |
             set -ex
+            # Pull scripts from Git repo
             git clone https://github.com/t9k/dify-workflow.git /tmp/repo
             mkdir -p /workspace/scripts
-            cp -v /tmp/repo/argo/blue-green/*.sh /workspace/scripts/
-        volumeMounts:
-          - name: workspace
-            mountPath: /workspace
+            cp /tmp/repo/argo/blue-green/*.sh /workspace/scripts/
 
-    - name: determine-active-env
-      container:
-        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
-        command: [sh, -c]
-        args:
-          - |
-            set -ex
             chmod +x /workspace/scripts/determine-active-env.sh
             /workspace/scripts/determine-active-env.sh
+
         volumeMounts:
           - name: workspace
             mountPath: /workspace
@@ -163,7 +153,7 @@ spec:
           - name: workspace
             mountPath: /workspace
 
-    - name: process-files
+    - name: update-dify-knowledge-base
       inputs:
         parameters:
           - name: host
@@ -180,7 +170,7 @@ spec:
             set -ex
             ACTIVE_ENV="{{inputs.parameters.active-env}}"
             mkdir -p /workspace/$ACTIVE_ENV
-            chmod +x /workspace/scripts/process_files.sh
+            chmod +x /workspace/scripts/update-dify-knowledge-base.sh
             export HOST="{{inputs.parameters.host}}"
             export API_KEY="{{inputs.parameters.api-key}}"
             
@@ -193,7 +183,7 @@ spec:
             export ALWAY_PUSH_ALL_FILES="{{inputs.parameters.alway-push-all-files}}"
             export WORKSPACE_DIR="/workspace/$ACTIVE_ENV"
             cd /workspace/$ACTIVE_ENV
-            /workspace/scripts/process_files.sh
+            /workspace/scripts/update-dify-knowledge-base.sh
         volumeMounts:
           - name: rclone
             mountPath: /s3cfg

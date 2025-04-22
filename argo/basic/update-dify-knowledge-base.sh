@@ -56,31 +56,20 @@ while read -r line; do
     
     # Check if document already exists
     doc_id=$(cat /workspace/dify_docs.json | jq -r --arg name "$filename" '.data[] | select(.name == $name) | .id')
-    
-    # Check if file is in created_files.txt
-    is_created=$(grep -q "^${filename}$" /workspace/created_files.txt && echo "yes" || echo "no")
-    
-    if [ -z "$doc_id" ] || [ "$is_created" = "yes" ]; then
-      # Document doesn't exist or is marked as created, create new one
+
+    # Document doesn't exist, create new one
+    if [ -z "$doc_id" ]; then
       echo "Creating new document for $filename"
       curl -v --location --request POST "http://${HOST}/v1/datasets/${DATASET_ID}/document/create-by-file" \
         --header "Authorization: Bearer ${API_KEY}" \
         --form 'data={"indexing_technique":"high_quality","doc_form":"text_model","process_rule":{"rules":{"pre_processing_rules":[{"id":"remove_extra_spaces","enabled":true},{"id":"remove_urls_emails","enabled":true}],"segmentation":{"separator":"\n\n","max_tokens":512}},"mode":"custom"},"retrieval_model":{"search_method":"semantic_search","reranking_enable":true,"reranking_model":{"reranking_provider_name":"openai_api_compatible","reranking_model_name":"bge-reranker-v2-m3"},"top_k":4,"score_threshold_enabled":true,"score_threshold":0.2},"embedding_model_provider":"openai_api_compatible","embedding_model":"bge-m3"};type=text/plain' \
         --form file=@"$local_path"
     else
-      # Check if file is in modified_files.txt
-      is_modified=$(grep -q "^${filename}$" /workspace/modified_files.txt && echo "yes" || echo "no")
-      
-      # Document exists and is marked as modified (or processing all files)
-      if [ "$is_modified" = "yes" ] || [ "${ALWAY_PUSH_ALL_FILES}" = "true" ]; then
-        echo "Updating existing document $doc_id for $filename"
-        curl -v --location --request POST "http://${HOST}/v1/datasets/${DATASET_ID}/documents/${doc_id}/update-by-file" \
-          --header "Authorization: Bearer ${API_KEY}" \
-          --form 'data={"process_rule":{"rules":{"pre_processing_rules":[{"id":"remove_extra_spaces","enabled":true},{"id":"remove_urls_emails","enabled":true}],"segmentation":{"separator":"\n\n","max_tokens":512}},"mode":"custom"}};type=text/plain' \
-          --form file=@"$local_path"
-      else
-        echo "Skipping unmodified file: $filename"
-      fi
+      echo "Updating existing document $doc_id for $filename"
+      curl -v --location --request POST "http://${HOST}/v1/datasets/${DATASET_ID}/documents/${doc_id}/update-by-file" \
+        --header "Authorization: Bearer ${API_KEY}" \
+        --form 'data={"process_rule":{"rules":{"pre_processing_rules":[{"id":"remove_extra_spaces","enabled":true},{"id":"remove_urls_emails","enabled":true}],"segmentation":{"separator":"\n\n","max_tokens":512}},"mode":"custom"}};type=text/plain' \
+        --form file=@"$local_path"
     fi
   fi
 done < "$files_to_process"

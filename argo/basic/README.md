@@ -57,20 +57,24 @@ argo submit -n argo --from cronworkflow/dify-s3-sync dify-s3-sync-template.yaml 
 1. `pull-scripts`：从 GitHub 拉取后续步骤的脚本并存储到共享脚本目录
 
 2. 并行步骤：
-   - `fetch-dify-docs`：从 Dify 获取现有文档列表
-     - 创建 `/workspace/dify_docs.json` 记录知识库的文档列表
-   - `sync-s3-files`：从 S3 存储桶获取文件
-     - 始终同步所有文件到 `/workspace/files/` 目录
-     - 创建 `/workspace/s3_files.txt` 记录所有文件以及修改时间
-     - 创建 `/workspace/created_files.txt` 记录新建的文件
-     - 创建 `/workspace/modified_files.txt` 记录修改的文件
-     - 创建 `/workspace/deleted_files.txt` 记录已删除的文件
 
-3. `process-files`：处理文件并与 Dify 同步
-    - 根据 `deleted_files.txt` 删除 Dify 中对应的文档
-    - 根据 `alway-push-all-files` 参数决定处理的文件范围：
-        - 当为 `true` 时，处理所有文件 (`s3_files.txt`)
-        - 当为 `false` 时，仅处理新建和修改的文件 (`created_files.txt` 和 `modified_files.txt`)
-    - 对每个需要处理的文件：
-        - 如果文件是新建的，在 Dify 中创建新文档
-        - 如果文件是修改的，更新 Dify 中的现有文档
+    - `fetch-dify-docs`：获取 Dify 知识库文档列表
+        - 创建 `/workspace/dify_docs.json` 记录文档列表
+
+    - `sync-s3-files`：从 S3 存储桶同步文件
+        - 始终同步所有文件到 `/workspace/files/` 目录
+        - 创建 `/workspace/s3_files.txt` 记录文件列表，包含文件名和修改时间
+        - 创建 `/workspace/created_files.txt` 记录新建的文件
+        - 创建 `/workspace/modified_files.txt` 记录修改的文件
+        - 创建 `/workspace/deleted_files.txt` 记录删除的文件
+
+3. `update-dify-knowledge-base`：更新 Dify 知识库
+
+    - 对于每个要删除的文件 (`deleted_files.txt`)，如果文件存在于文档列表中，则删除该文档
+
+    - 根据 `alway-push-all-files` 参数决定上传的文件：
+        - 若为 `true`，上传文件列表 (`s3_files.txt`) 中的所有文件
+        - 若为 `false`，仅上传要新建和修改的文件 (`created_files.txt` 和 `modified_files.txt`)
+        - 对每个上传的文件：
+            - 如果文件存在于文档列表中，则更新该文档
+            - 如果文件不存在于文档列表中，则创建文档
