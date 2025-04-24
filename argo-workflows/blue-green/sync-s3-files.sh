@@ -35,18 +35,18 @@ rclone lsl --config /root/.config/rclone/rclone.conf minio:${S3_BUCKET} | while 
   echo "${file} ${mod_date} ${mod_time}" >> ${WORKSPACE_DIR}/s3_files.txt.new
 done
 
-# Create or clear modified_files.txt, created_files.txt, and deleted_files.txt
-> ${WORKSPACE_DIR}/modified_files.txt
-> ${WORKSPACE_DIR}/created_files.txt
-> ${WORKSPACE_DIR}/deleted_files.txt
+# Create or clear files_to_modify.txt, files_to_create.txt, and files_to_delete.txt
+> ${WORKSPACE_DIR}/files_to_modify.txt
+> ${WORKSPACE_DIR}/files_to_create.txt
+> ${WORKSPACE_DIR}/files_to_delete.txt
 
 # Cold start scenario: If s3_files.txt doesn't exist, treat all files as created
 if [ ! -f ${WORKSPACE_DIR}/s3_files.txt ]; then
   echo "Cold start detected (no previous s3_files.txt). Treating all files as created..."
-  # Extract filenames from s3_files.txt.new and add to created_files.txt
-  cat ${WORKSPACE_DIR}/s3_files.txt.new | awk '{print $1}' >> ${WORKSPACE_DIR}/created_files.txt
-  echo "Added $(wc -l < ${WORKSPACE_DIR}/created_files.txt) files to created_files.txt"
-# Normal case: If s3_files.txt exists and is not empty, compare and create modified_files.txt, created_files.txt, and deleted_files.txt
+  # Extract filenames from s3_files.txt.new and add to files_to_create.txt
+  cat ${WORKSPACE_DIR}/s3_files.txt.new | awk '{print $1}' >> ${WORKSPACE_DIR}/files_to_create.txt
+  echo "Added $(wc -l < ${WORKSPACE_DIR}/files_to_create.txt) files to files_to_create.txt"
+# Normal case: If s3_files.txt exists and is not empty, compare and create files_to_modify.txt, files_to_create.txt, and files_to_delete.txt
 elif [ -s ${WORKSPACE_DIR}/s3_files.txt ]; then
   echo "Checking for modified, created, and deleted files..."
   
@@ -57,7 +57,7 @@ elif [ -s ${WORKSPACE_DIR}/s3_files.txt ]; then
     
     if [ "$old_file_exists" = "no" ]; then
       # File is newly created
-      echo "$file" >> ${WORKSPACE_DIR}/created_files.txt
+      echo "$file" >> ${WORKSPACE_DIR}/files_to_create.txt
     else
       # Check if file was modified
       old_mod_date=$(grep "^${file} " ${WORKSPACE_DIR}/s3_files.txt | awk '{print $2}')
@@ -67,7 +67,7 @@ elif [ -s ${WORKSPACE_DIR}/s3_files.txt ]; then
       new_mod_time=$(echo "$new_mod_datetime" | awk '{print $2}')
       
       if [ "$old_mod_date" != "$new_mod_date" ] || [ "$old_mod_time" != "$new_mod_time" ]; then
-        echo "$file" >> ${WORKSPACE_DIR}/modified_files.txt
+        echo "$file" >> ${WORKSPACE_DIR}/files_to_modify.txt
       fi
     fi
   done < ${WORKSPACE_DIR}/s3_files.txt.new
@@ -79,25 +79,22 @@ elif [ -s ${WORKSPACE_DIR}/s3_files.txt ]; then
     
     if [ "$new_file_exists" = "no" ]; then
       # File was deleted
-      echo "$file" >> ${WORKSPACE_DIR}/deleted_files.txt
+      echo "$file" >> ${WORKSPACE_DIR}/files_to_delete.txt
     fi
   done < ${WORKSPACE_DIR}/s3_files.txt
 else
   # s3_files.txt exists but is empty
   echo "Previous s3_files.txt is empty. Treating all files as created..."
-  # Extract filenames from s3_files.txt.new and add to created_files.txt
-  cat ${WORKSPACE_DIR}/s3_files.txt.new | awk '{print $1}' >> ${WORKSPACE_DIR}/created_files.txt
-  echo "Added $(wc -l < ${WORKSPACE_DIR}/created_files.txt) files to created_files.txt"
+  # Extract filenames from s3_files.txt.new and add to files_to_create.txt
+  cat ${WORKSPACE_DIR}/s3_files.txt.new | awk '{print $1}' >> ${WORKSPACE_DIR}/files_to_create.txt
+  echo "Added $(wc -l < ${WORKSPACE_DIR}/files_to_create.txt) files to files_to_create.txt"
 fi
-
-# Move new s3_files.txt into place
-mv ${WORKSPACE_DIR}/s3_files.txt.new ${WORKSPACE_DIR}/s3_files.txt
 
 # List synced files
 echo "Synced files:"
 ls -la /workspace/files/
 
 # Print stats
-echo "Created files: $(wc -l < ${WORKSPACE_DIR}/created_files.txt)"
-echo "Modified files: $(wc -l < ${WORKSPACE_DIR}/modified_files.txt)"
-echo "Deleted files: $(wc -l < ${WORKSPACE_DIR}/deleted_files.txt)"
+echo "Files to create: $(wc -l < ${WORKSPACE_DIR}/files_to_create.txt)"
+echo "Files to modify: $(wc -l < ${WORKSPACE_DIR}/files_to_modify.txt)"
+echo "Files to delete: $(wc -l < ${WORKSPACE_DIR}/files_to_delete.txt)"

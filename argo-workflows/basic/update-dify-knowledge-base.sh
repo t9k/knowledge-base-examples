@@ -10,10 +10,10 @@
 
 set -ex
 
-# Process deletions using the deleted_files.txt file
+# Process deletions using the files_to_delete.txt file
 echo "Processing deletions..."
-if [ -f /workspace/deleted_files.txt ]; then
-  cat /workspace/deleted_files.txt | while read -r filename; do
+if [ -f /workspace/files_to_delete.txt ]; then
+  cat /workspace/files_to_delete.txt | while read -r filename; do
     if [ ! -z "$filename" ]; then
       # Find document ID for the deleted file
       doc_id=$(cat /workspace/dify_docs.json | jq -r --arg name "$filename" '.data[] | select(.name == $name) | .id')
@@ -32,11 +32,11 @@ fi
 # Determine which files to process based on ALWAY_PUSH_ALL_FILES setting
 if [ "${ALWAY_PUSH_ALL_FILES}" = "true" ]; then
   echo "Processing all files..."
-  files_to_process="/workspace/s3_files.txt"
+  files_to_process="${WORKSPACE_DIR}/s3_files.txt.new"
 else
   echo "Processing only created and modified files..."
   # Create a temporary file containing both created and modified files
-  cat /workspace/created_files.txt /workspace/modified_files.txt > /workspace/files_to_process.txt
+  cat /workspace/files_to_create.txt /workspace/files_to_modify.txt > /workspace/files_to_process.txt
   files_to_process="/workspace/files_to_process.txt"
 fi
 
@@ -78,3 +78,36 @@ done < "$files_to_process"
 if [ "${ALWAY_PUSH_ALL_FILES}" != "true" ] && [ -f /workspace/files_to_process.txt ]; then
   rm /workspace/files_to_process.txt
 fi 
+
+# Add or update metadata for version tracking
+echo "Adding or updating version metadata..."
+
+# Generate version string with current date and time
+VERSION_STRING="version_$(date +'%Y%m%d_%H%M%S')"
+echo "Version string: $VERSION_STRING"
+
+# First, check if version metadata already exists
+METADATA_RESPONSE=$(curl --silent --location --request GET "http://${HOST}/v1/datasets/${DATASET_ID}/metadata" \
+  --header "Authorization: Bearer ${API_KEY}")
+
+# Extract version metadata ID if it exists
+VERSION_METADATA_ID=$(echo "$METADATA_RESPONSE" | jq -r '.doc_metadata[] | select(.name | startswith("version_")) | .id' 2>/dev/null || echo "")
+
+if [ -z "$VERSION_METADATA_ID" ] || [ "$VERSION_METADATA_ID" = "null" ]; then
+  # Version metadata doesn't exist, create it
+  echo "Creating new version metadata..."
+  curl --location --request POST "http://${HOST}/v1/datasets/${DATASET_ID}/metadata" \
+    --header "Authorization: Bearer ${API_KEY}" \
+    --header "Content-Type: application/json" \
+    --data-raw "{\"type\": \"string\", \"name\": \"$VERSION_STRING\"}"
+else
+  # Version metadata exists, update it
+  echo "Updating existing version metadata (ID: $VERSION_METADATA_ID)..."
+  curl --location --request PATCH "http://${HOST}/v1/datasets/${DATASET_ID}/metadata/${VERSION_METADATA_ID}" \
+    --header "Authorization: Bearer ${API_KEY}" \
+    --header "Content-Type: application/json" \
+    --data-raw "{\"name\": \"$VERSION_STRING\"}"
+fi
+
+# Move new s3_files.txt into place - only done after successful completion of the entire workflow
+mv /workspace/s3_files.txt.new /workspace/s3_files.txt 

@@ -70,9 +70,9 @@ spec:
         args:
           - |
             set -ex
-            git clone https://github.com/t9k/dify-workflow.git /tmp/repo
+            git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
             mkdir -p /workspace/scripts
-            cp /tmp/repo/argo/basic/*.sh /workspace/scripts/
+            cp /tmp/repo/argo-workflows/basic/*.sh /workspace/scripts/
         volumeMounts:
           - name: workspace
             mountPath: /workspace
@@ -88,10 +88,10 @@ spec:
         args:
           - |
             set -ex
-            chmod +x /workspace/scripts/sync_s3_files.sh
+            chmod +x /workspace/scripts/sync-s3-files.sh
             export ALWAY_PUSH_ALL_FILES="{{inputs.parameters.alway-push-all-files}}"
             export S3_BUCKET="{{inputs.parameters.s3-bucket}}"
-            /workspace/scripts/sync_s3_files.sh
+            /workspace/scripts/sync-s3-files.sh
         volumeMounts:
           - name: rclone
             mountPath: /s3cfg
@@ -110,11 +110,11 @@ spec:
         args:
           - |
             set -ex
-            chmod +x /workspace/scripts/fetch_dify_docs.sh
+            chmod +x /workspace/scripts/fetch-dify-docs.sh
             export HOST="{{inputs.parameters.host}}"
             export API_KEY="{{inputs.parameters.api-key}}"
             export DATASET_ID="{{inputs.parameters.dataset-id}}"
-            /workspace/scripts/fetch_dify_docs.sh
+            /workspace/scripts/fetch-dify-docs.sh
         volumeMounts:
           - name: workspace
             mountPath: /workspace

@@ -83,9 +83,9 @@ spec:
           - |
             set -ex
             # Pull scripts from Git repo
-            git clone https://github.com/t9k/dify-workflow.git /tmp/repo
+            git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
             mkdir -p /workspace/scripts
-            cp /tmp/repo/argo/blue-green/*.sh /workspace/scripts/
+            cp /tmp/repo/argo-workflows/blue-green/*.sh /workspace/scripts/
 
             chmod +x /workspace/scripts/determine-active-env.sh
             /workspace/scripts/determine-active-env.sh
@@ -108,12 +108,12 @@ spec:
             set -ex
             ACTIVE_ENV="{{inputs.parameters.active-env}}"
             mkdir -p /workspace/$ACTIVE_ENV
-            chmod +x /workspace/scripts/sync_s3_files.sh
+            chmod +x /workspace/scripts/sync-s3-files.sh
             export ALWAY_PUSH_ALL_FILES="{{inputs.parameters.alway-push-all-files}}"
             export S3_BUCKET="{{inputs.parameters.s3-bucket}}"
             export WORKSPACE_DIR="/workspace/$ACTIVE_ENV"
             cd /workspace/$ACTIVE_ENV
-            /workspace/scripts/sync_s3_files.sh
+            /workspace/scripts/sync-s3-files.sh
         volumeMounts:
           - name: rclone
             mountPath: /s3cfg
@@ -136,7 +136,7 @@ spec:
             set -ex
             ACTIVE_ENV="{{inputs.parameters.active-env}}"
             mkdir -p /workspace/$ACTIVE_ENV
-            chmod +x /workspace/scripts/fetch_dify_docs.sh
+            chmod +x /workspace/scripts/fetch-dify-docs.sh
             export HOST="{{inputs.parameters.host}}"
             export API_KEY="{{inputs.parameters.api-key}}"
             
@@ -148,7 +148,7 @@ spec:
             
             export WORKSPACE_DIR="/workspace/$ACTIVE_ENV"
             cd /workspace/$ACTIVE_ENV
-            /workspace/scripts/fetch_dify_docs.sh
+            /workspace/scripts/fetch-dify-docs.sh
         volumeMounts:
           - name: workspace
             mountPath: /workspace

@@ -39,15 +39,15 @@
 │   └── sync_s3_files.sh
 ├── blue/                 # 蓝色环境
 │   ├── dify_docs.json
-│   ├── created_files.txt
-│   ├── modified_files.txt
-│   ├── deleted_files.txt
+│   ├── files_to_create.txt
+│   ├── files_to_modify.txt
+│   ├── files_to_delete.txt
 │   └── s3_files.txt
 ├── green/                # 绿色环境
 │   ├── dify_docs.json
-│   ├── created_files.txt
-│   ├── modified_files.txt
-│   ├── deleted_files.txt
+│   ├── files_to_create.txt
+│   ├── files_to_modify.txt
+│   ├── files_to_delete.txt
 │   └── s3_files.txt
 └── flag.txt              # 记录当前活动环境（blue 或 green）
 ```
@@ -102,17 +102,17 @@ argo submit -n argo --from cronworkflow/dify-s3-sync dify-s3-sync-template.yaml 
     - `sync-s3-files`：从 S3 存储桶获取文件
         - 始终同步所有文件到共享的 `/workspace/files/` 目录
         - 创建活动环境的 `s3_files.txt` 记录文件列表，包含文件名和修改时间
-        - 创建活动环境的 `created_files.txt` 记录新建的文件
-        - 创建活动环境的 `modified_files.txt` 记录修改的文件
-        - 创建活动环境的 `deleted_files.txt` 记录删除的文件
+        - 创建活动环境的 `files_to_create.txt` 记录新建的文件
+        - 创建活动环境的 `files_to_modify.txt` 记录修改的文件
+        - 创建活动环境的 `files_to_delete.txt` 记录删除的文件
 
 3. `update-dify-knowledge-base`：更新当前活动环境对应的 Dify 知识库
    
-    - 对于每个要删除的文件 (`deleted_files.txt`)，如果文件存在于文档列表中，则删除该文档
+    - 对于每个要删除的文件 (`files_to_delete.txt`)，如果文件存在于文档列表中，则删除该文档
 
     - 根据 `alway-push-all-files` 参数决定上传的文件：
         - 若为 `true`，上传文件列表 (`s3_files.txt`) 中的所有文件
-        - 若为 `false`，仅上传要新建和修改的文件 (`created_files.txt` 和 `modified_files.txt`)
+        - 若为 `false`，仅上传要新建和修改的文件 (`files_to_create.txt` 和 `files_to_modify.txt`)
         - 对每个上传的文件：
             - 如果文件存在于文档列表中，则更新该文档
             - 如果文件不存在于文档列表中，则创建文档
