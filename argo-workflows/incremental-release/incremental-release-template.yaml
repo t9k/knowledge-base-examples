@@ -1,0 +1,96 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: incremental-release
+spec:
+  entrypoint: sync-and-process
+  arguments:
+    parameters:
+      - name: collection-name
+        description: "Milvus collection name to create/use"
+  volumes:
+    - name: rclone
+      configMap:
+        name: rclone-config
+        items:
+          - key: rclone.conf
+            path: rclone.conf
+    - name: workspace
+      persistentVolumeClaim:
+        claimName: incremental-release-pvc
+    - name: env-config
+      configMap:
+        name: incremental-release-config
+  templates:
+    - name: sync-and-process
+      steps:
+        - - name: prepare
+            template: prepare
+        - - name: sync-files
+            template: sync-files
+        - - name: update-data
+            template: update-data
+            arguments:
+              parameters:
+                - name: collection-name
+                  value: "{{workflow.parameters.collection-name}}"
+
+    - name: prepare
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh, -c]
+        args:
+          - |
+            set -ex
+            git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
+            mkdir -p /workspace/scripts
+            cp /tmp/repo/argo-workflows/incremental-release/*.sh /workspace/scripts/
+            cp /tmp/repo/argo-workflows/incremental-release/*.py /workspace/scripts/
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+
+    - name: sync-files
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh, -c]
+        args:
+          - |
+            set -ex
+            chmod +x /workspace/scripts/sync-files.sh
+            /workspace/scripts/sync-files.sh
+        volumeMounts:
+          - name: rclone
+            mountPath: /s3cfg
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+ 
+    - name: update-data
+      inputs:
+        parameters:
+          - name: collection-name
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/python:3.10-milvus
+        command: [/bin/bash, -c]
+        args:
+          - |
+            set -ex
+            chmod +x /workspace/scripts/update-data.py
+            export COLLECTION_NAME="{{inputs.parameters.collection-name}}"
+            source /env-config/env.properties
+            export S3_PATH
+            export MILVUS_URI
+            export MILVUS_TOKEN
+            export EMBEDDING_BASE_URL
+            export EMBEDDING_MODEL
+            export EMBEDDING_DIM
+            python /workspace/scripts/update-data.py
+        volumeMounts:
+          - name: rclone
+            mountPath: /s3cfg
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config 

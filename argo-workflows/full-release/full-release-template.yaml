@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: full-deployment
+  name: full-release
 spec:
   entrypoint: sync-and-process
   arguments:
@@ -17,10 +17,10 @@ spec:
             path: rclone.conf
     - name: workspace
       persistentVolumeClaim:
-        claimName: full-deployment-pvc
+        claimName: full-release-pvc
     - name: env-config
       configMap:
-        name: full-deployment-config
+        name: full-release-config
   templates:
     - name: sync-and-process
       steps:
@@ -44,8 +44,8 @@ spec:
             set -ex
             git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
             mkdir -p /workspace/scripts
-            cp /tmp/repo/argo-workflows/full-deployment/*.sh /workspace/scripts/
-            cp /tmp/repo/argo-workflows/full-deployment/*.py /workspace/scripts/
+            cp /tmp/repo/argo-workflows/full-release/*.sh /workspace/scripts/
+            cp /tmp/repo/argo-workflows/full-release/*.py /workspace/scripts/
         volumeMounts:
           - name: workspace
             mountPath: /workspace

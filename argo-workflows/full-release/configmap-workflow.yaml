@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: full-release-config
+data:
+  env.properties: |
+    S3_PATH="s3://my-bucket/path"
+    MILVUS_URI="http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
+    MILVUS_TOKEN="root:Milvus"
+    EMBEDDING_BASE_URL="http://app-vllm-xxxxxxxx.namespace.ksvc.tensorstack.net/v1"
+    EMBEDDING_MODEL="bge-m3"
+    EMBEDDING_DIM=1024 

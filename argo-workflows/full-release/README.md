@@ -11,7 +11,7 @@
 
 ## 文件说明
 
-- `full-deployment-template.yaml`：Argo WorkflowTemplate 定义
+- `full-release-template.yaml`：Argo WorkflowTemplate 定义
 - `configmap-workflow.yaml`：配置工作流的 ConfigMap
 - `configmap-rclone-s3.yaml`：配置 S3 访问的 ConfigMap
 - `pvc.yaml`：工作空间存储的 PersistentVolumeClaim
@@ -24,7 +24,7 @@
 
 - `collection-name`：Milvus 集合名称
 
-ConfigMap full-deployment-config 包含以下环境变量：
+ConfigMap full-release-config 包含以下环境变量：
 
 - `S3_PATH`：S3 文件匹配路径
 - `MILVUS_URI`：Milvus 连接 URI
@@ -38,7 +38,8 @@ ConfigMap rclone-config 包含 rclone 配置文件，用于访问 S3 存储桶�
 
 1. 创建 ConfigMap：
    ```bash
-   kubectl apply -f configmap.yaml
+   kubectl apply -f configmap-workflow.yaml
+   kubectl apply -f configmap-rclone-s3.yaml
    ```
 
 2. 创建 PVC：
@@ -48,7 +49,7 @@ ConfigMap rclone-config 包含 rclone 配置文件，用于访问 S3 存储桶�
 
 3. 注册工作流模板：
    ```bash
-   kubectl apply -f full-deployment-template.yaml
+   kubectl apply -f full-release-template.yaml
    ```
 
 ## 手动执行
@@ -56,6 +57,6 @@ ConfigMap rclone-config 包含 rclone 配置文件，用于访问 S3 存储桶�
 手动运行工作流：
 
 ```bash
-argo submit --from workflowtemplate/full-deployment \
+argo submit --from workflowtemplate/full-release \
   -p collection-name=<your-collection-name>
 ```

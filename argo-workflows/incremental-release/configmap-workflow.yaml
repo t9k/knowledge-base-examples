@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: full-deployment-config
+  name: incremental-release-config
 data:
   env.properties: |
     S3_PATH="s3://my-bucket/path"
