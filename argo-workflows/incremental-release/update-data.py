@@ -1,31 +1,49 @@
 #!/usr/bin/env python3
 """
-Script to incrementally process text files, chunk them, create embeddings, and update them in Milvus.
-This script implements the incremental deployment workflow for updating data in a Milvus collection.
+Script to process text files, chunk them, create embeddings, and store them in Milvus.
+This script implements the full deployment workflow for inserting data into a Milvus collection.
 
 Environment variables:
-- COLLECTION_NAME: Name of the Milvus collection to use
+- DATABASE_NAME: Name of the Milvus database to use
+- COLLECTION_NAME: Name of the Milvus collection to create/use
 - MILVUS_URI: Milvus connection URI
 - EMBEDDING_BASE_URL: Base URL for the embedding model API
 - EMBEDDING_MODEL: Name of the embedding model to use
 - EMBEDDING_DIM: Dimension of the embedding vectors
+- LOG_FILE: Optional path to the log file
 """
 
 import os
-import shutil
-from typing import List, Dict, Any, Tuple
+import glob
+import datetime
+import sys
+from typing import List, Dict, Any
 import logging
+from dotenv import load_dotenv
 
 from tqdm import tqdm
 from openai import OpenAI
 from pymilvus import MilvusClient, DataType
 
 # Set up logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+# Check if LOG_FILE environment variable is set
+log_file = os.environ.get("LOG_FILE")
+if log_file:
+    # When running in the workflow with tee redirecting output to a log file,
+    # only use StreamHandler to avoid duplicate logs
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s',
+                        handlers=[logging.StreamHandler(sys.stdout)])
+else:
+    # Default logging setup
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables
+load_dotenv("/env-config/env.properties")
+DATABASE_NAME = os.environ.get("DATABASE_NAME")
 COLLECTION_NAME = os.environ.get("COLLECTION_NAME")
 MILVUS_URI = os.environ.get("MILVUS_URI")
 MILVUS_TOKEN = os.environ.get("MILVUS_TOKEN")
@@ -33,97 +51,63 @@ EMBEDDING_BASE_URL = os.environ.get("EMBEDDING_BASE_URL")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL")
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM"))
 
+# Log environment variables
+logger.info("=== update-data.py environment ===")
+logger.info(f"DATABASE_NAME: {DATABASE_NAME}")
+logger.info(f"COLLECTION_NAME: {COLLECTION_NAME}")
+logger.info(f"MILVUS_URI: {MILVUS_URI}")
+logger.info(f"EMBEDDING_BASE_URL: {EMBEDDING_BASE_URL}")
+logger.info(f"EMBEDDING_MODEL: {EMBEDDING_MODEL}")
+logger.info(f"EMBEDDING_DIM: {EMBEDDING_DIM}")
+logger.info(f"LOG_FILE: {log_file}")
+
 # Constants
 CHUNK_SIZE = 512  # Token size for each chunk
 CHUNK_OVERLAP = 64  # Token overlap between chunks
-LOG_FILE = "/workspace/log.txt"
 
 
-def log_message(message: str) -> None:
-    """Log message to both logger and log file.
+def load_documents() -> Dict[str, str]:
+    """Load document files from workspace/files directory.
     
-    Args:
-        message: Message to log
-    """
-    logger.info(message)
-    with open(LOG_FILE, "a") as f:
-        f.write(f"{message}\n")
-
-
-def parse_change_log() -> Tuple[List[str], List[str], List[str]]:
-    """Parse the log file to identify files to create, modify, and delete.
-    Only parses log entries from the last sync run (after the last SYNC_BOUNDARY).
-    
-    Returns:
-        Tuple of (files_to_create, files_to_modify, files_to_delete)
-    """
-    files_to_create = []
-    files_to_modify = []
-    files_to_delete = []
-
-    try:
-        with open(LOG_FILE, "r") as f:
-            log_content = f.read()
-            
-        # Split by sync boundary marker and get the last section
-        sections = log_content.split("====================SYNC_BOUNDARY====================")
-        if not sections:
-            logger.warning("No sync boundaries found in log file")
-            return files_to_create, files_to_modify, files_to_delete
-            
-        # Get the last section (most recent sync run)
-        last_section = sections[-1]
-        
-        # Process each line in the last section
-        for line in last_section.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-                
-            if line.startswith("TO_CREATE: "):
-                files_to_create.append(line[11:])  # Remove 'TO_CREATE: ' prefix
-            elif line.startswith("TO_MODIFY: "):
-                files_to_modify.append(line[11:])  # Remove 'TO_MODIFY: ' prefix
-            elif line.startswith("TO_DELETE: "):
-                files_to_delete.append(line[11:])  # Remove 'TO_DELETE: ' prefix
-    except Exception as e:
-        logger.error(f"Error parsing change log: {e}")
-
-    return files_to_create, files_to_modify, files_to_delete
-
-
-def load_documents(file_list: List[str]) -> Dict[str, str]:
-    """Load specific document files from workspace/files directory.
-    
-    Args:
-        file_list: List of file paths to load
-        
     Returns:
         Dict mapping filenames to file contents
     """
     file_contents = {}
 
-    logger.info(f"Loading {len(file_list)} documents...")
-    
-    for file_path in file_list:
+    # Process all files (full deployment)
+    logger.info("Processing all files (full deployment)...")
+    file_pattern = ["/workspace/files/**/*.txt", "/workspace/files/**/*.md"]
+    files_to_process = []
+    for pattern in file_pattern:
+        files_to_process.extend(glob.glob(pattern, recursive=True))
+
+    logger.info(f"Found {len(files_to_process)} files to process")
+
+    # Load file contents
+    for file_path in files_to_process:
         try:
-            full_path = os.path.join("/workspace/files/", file_path)
-            with open(full_path, "r", encoding="utf-8") as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
                 if content:
-                    file_contents[file_path] = content
+                    relative_path = os.path.relpath(file_path,
+                                                    "/workspace/files/")
+                    file_contents[relative_path] = content
+                    logger.debug(
+                        f"Loaded file: {relative_path} ({len(content)} bytes)")
         except Exception as e:
             logger.error(f"Error loading file {file_path}: {e}")
 
     return file_contents
 
 
-def chunk_text(text: str, filename: str) -> List[Dict[str, Any]]:
+def chunk_text(text: str, filename: str,
+               last_modified: str) -> List[Dict[str, Any]]:
     """Split text into chunks with metadata.
     
     Args:
         text: Text content to chunk
         filename: Source filename for metadata
+        last_modified: Last modification time of the file
         
     Returns:
         List of chunk objects with text and metadata
@@ -144,7 +128,8 @@ def chunk_text(text: str, filename: str) -> List[Dict[str, Any]]:
                 chunks.append({
                     "text": current_chunk,
                     "metadata": {
-                        "source": filename
+                        "source": filename,
+                        "last_modified": last_modified
                     }
                 })
             current_chunk = paragraph
@@ -160,7 +145,8 @@ def chunk_text(text: str, filename: str) -> List[Dict[str, Any]]:
         chunks.append({
             "text": current_chunk,
             "metadata": {
-                "source": filename
+                "source": filename,
+                "last_modified": last_modified
             }
         })
 
@@ -177,23 +163,29 @@ def create_embedding(text: str, client: OpenAI) -> List[float]:
     Returns:
         Embedding vector
     """
-    try:
-        response = client.embeddings.create(input=text, model=EMBEDDING_MODEL)
-        return response.data[0].embedding
-    except Exception as e:
-        logger.error(f"Error creating embedding: {e}")
-        # Return a zero vector as fallback
-        return [0.0] * EMBEDDING_DIM
+    response = client.embeddings.create(input=text, model=EMBEDDING_MODEL)
+    return response.data[0].embedding
 
 
-def ensure_collection_exists(client: MilvusClient) -> None:
-    """Ensure Milvus collection exists.
+def setup_milvus(client: MilvusClient) -> None:
+    """Setup Milvus collection.
     
     Args:
         client: Milvus client instance
     """
+    if DATABASE_NAME not in client.list_databases():
+        logger.error(f"Database {DATABASE_NAME} does not exist")
+        raise RuntimeError(
+            f"Database {DATABASE_NAME} does not exist. Please create the database manually."
+        )
+
+    client.using_database(DATABASE_NAME)
+    logger.info(f"Using database: {DATABASE_NAME}")
+
     # Check if collection exists, create it if not
     if not client.has_collection(COLLECTION_NAME):
+        logger.info(
+            f"Collection {COLLECTION_NAME} does not exist, creating it...")
         # Create schema using the pattern from full-text-search.py
         schema = MilvusClient.create_schema()
         schema.add_field(field_name="id",
@@ -206,6 +198,9 @@ def ensure_collection_exists(client: MilvusClient) -> None:
         schema.add_field(field_name="source",
                          datatype=DataType.VARCHAR,
                          max_length=255)
+        schema.add_field(field_name="last_modified",
+                         datatype=DataType.VARCHAR,
+                         max_length=64)
         schema.add_field(field_name="vector",
                          datatype=DataType.FLOAT_VECTOR,
                          dim=EMBEDDING_DIM)
@@ -222,33 +217,87 @@ def ensure_collection_exists(client: MilvusClient) -> None:
         client.create_collection(collection_name=COLLECTION_NAME,
                                  schema=schema,
                                  index_params=index_params)
-        log_message(f"Created new collection: {COLLECTION_NAME}")
     else:
-        logger.info(f"Using existing collection {COLLECTION_NAME}")
+        logger.info(f"Collection {COLLECTION_NAME} already exists")
 
 
-def insert_document(filename: str, content: str, milvus_client: MilvusClient,
-                   embedding_client: OpenAI) -> None:
-    """Process a single document, create chunks, and insert in Milvus.
+def delete_by_source(source: str, milvus_client: MilvusClient) -> None:
+    """Delete all records with the specified source from Milvus.
     
     Args:
-        filename: File name to process
+        source: Source field value to match for deletion
+        milvus_client: Milvus client instance
+    """
+    # Prepare expression to filter by source
+    expr = f'source == "{source}"'
+
+    try:
+        # Delete all records matching the source
+        result = milvus_client.delete(collection_name=COLLECTION_NAME,
+                                      filter=expr)
+        milvus_client.flush(COLLECTION_NAME)
+        logger.info(
+            f"Deleted {result['delete_count']} records with source: {source}")
+    except Exception as e:
+        logger.error(f"Error deleting records with source {source}: {e}")
+
+
+def process_document(filename: str, content: str, milvus_client: MilvusClient,
+                     embedding_client: OpenAI) -> None:
+    """Process a single document, create chunks, and store in Milvus.
+    
+    Args:
+        filename: Source filename
         content: Document content
         milvus_client: Milvus client instance
         embedding_client: OpenAI client for embeddings
     """
-    if not content:
-        log_message(f"Empty content for {filename}, skipping")
-        return
-        
-    log_message(f"Processing document for insertion: {filename}")
-    chunks = chunk_text(content, filename)
-    
-    if not chunks:
-        log_message(f"No chunks created for {filename}, skipping")
-        return
-        
-    log_message(f"Created {len(chunks)} chunks for {filename}")
+    logger.info(f"Processing document: {filename}")
+
+    # Get last modified time of the file
+    file_path = os.path.join("/workspace/files/", filename)
+    last_modified = datetime.datetime.fromtimestamp(
+        os.path.getmtime(file_path)).isoformat()
+    logger.info(f"File last modified: {last_modified}")
+
+    # First check if there are any entities with matching filename
+    expr = f'source == "{filename}"'
+    search_results = milvus_client.query(collection_name=COLLECTION_NAME,
+                                         filter=expr,
+                                         output_fields=["id", "last_modified"],
+                                         limit=1)
+
+    # If no entities match the filename, proceed with normal processing
+    if not search_results:
+        logger.info(
+            f"No existing entities found for {filename}, proceeding with full processing"
+        )
+    else:
+        # Check if there are entities with matching filename AND last_modified
+        expr = f'source == "{filename}" AND last_modified == "{last_modified}"'
+        exact_match_results = milvus_client.query(
+            collection_name=COLLECTION_NAME,
+            filter=expr,
+            output_fields=["id"],
+            limit=1)
+
+        # If entities with matching filename AND last_modified exist, skip processing
+        if exact_match_results:
+            logger.info(
+                f"Found existing entities for {filename} with matching last_modified time, skipping processing"
+            )
+            return
+
+        # If entities with matching filename exist but none with matching last_modified,
+        # delete entities with matching filename
+        logger.info(
+            f"Found existing entities for {filename} but with different last_modified time, deleting and reprocessing"
+        )
+        delete_by_source(filename, milvus_client)
+
+    # Create chunks from the document
+    chunks = chunk_text(content, filename, last_modified)
+    logger.info(f"Created {len(chunks)} chunks from {filename}")
 
     # Create embeddings and prepare data for Milvus
     milvus_data = []
@@ -257,144 +306,52 @@ def insert_document(filename: str, content: str, milvus_client: MilvusClient,
         milvus_data.append({
             "text": chunk["text"],
             "source": chunk["metadata"]["source"],
+            "last_modified": chunk["metadata"]["last_modified"],
             "vector": embedding
         })
 
     # Insert data into Milvus
     if milvus_data:
-        log_message(f"Inserting {len(milvus_data)} chunks for {filename} into Milvus collection {COLLECTION_NAME}")
-        milvus_client.insert(COLLECTION_NAME, milvus_data)
-        
-        # 强制刷新集合以确保插入生效
-        try:
-            milvus_client.flush(COLLECTION_NAME)
-            log_message(f"Flushed collection after insertion")
-        except Exception as e:
-            logger.warning(f"Failed to flush collection after insertion: {e}")
-            
-        log_message(f"CREATED: {filename}")
-    else:
-        log_message(f"No data to insert for {filename}")
-
-
-def delete_document(filename: str, milvus_client: MilvusClient) -> None:
-    """Delete a document from Milvus based on source filename.
-    
-    Args:
-        filename: Filename to delete
-        milvus_client: Milvus client instance
-    """
-    log_message(f"Deleting data for file: {filename}")
-    
-    # 正确构造删除表达式，确保完全匹配
-    expr = f'source == "{filename}"'
-    
-    try:
-        # 检查是否有匹配的记录
-        search_results = milvus_client.query(
-            collection_name=COLLECTION_NAME,
-            filter=expr,
-            output_fields=["id"],
-            limit=1
+        logger.info(
+            f"Inserting {len(milvus_data)} documents from {filename} into Milvus collection {COLLECTION_NAME}"
         )
-        
-        # 如果有匹配记录，执行删除
-        if search_results:
-            # 执行删除操作
-            result = milvus_client.delete(
-                collection_name=COLLECTION_NAME,
-                filter=expr
-            )
-            
-            # 强制刷新集合以确保删除生效
-            try:
-                milvus_client.flush(COLLECTION_NAME)
-                log_message(f"Flushed collection after deletion")
-            except Exception as e:
-                logger.warning(f"Failed to flush collection after deletion: {e}")
-            
-            log_message(f"Deleted {result['delete_count']} rows for {filename}")
-            log_message(f"DELETED: {filename}")
-        else:
-            log_message(f"No records found for {filename}, nothing to delete")
-    except Exception as e:
-        logger.error(f"Error deleting data for {filename}: {e}")
-        log_message(f"Failed to delete {filename}: {str(e)}")
-
-
-def update_document(filename: str, content: str, milvus_client: MilvusClient,
-                   embedding_client: OpenAI) -> None:
-    """Update a document by first deleting it and then inserting new version.
-    
-    Args:
-        filename: Filename to update
-        content: New document content
-        milvus_client: Milvus client instance
-        embedding_client: OpenAI client for embeddings
-    """
-    log_message(f"Updating data for file: {filename}")
-    
-    # 先删除旧数据
-    delete_document(filename, milvus_client)
-    
-    # 再插入新数据（insert_document内部会添加CREATED日志）
-    insert_document(filename, content, milvus_client, embedding_client)
-    
-    # 将CREATED日志修改为MODIFIED日志
-    log_message(f"MODIFIED: {filename}")
+        milvus_client.insert(COLLECTION_NAME, milvus_data)
+        logger.info(f"Data insertion for {filename} complete")
+    else:
+        logger.warning(f"No data to insert for {filename}")
 
 
 def main():
-    """Main function to run the incremental data update workflow."""
-    log_message("Starting update-data workflow")
+    """Main function to run the data processing and insertion workflow."""
+    logger.info("=== Starting update-data.py workflow ===")
 
-    # Initialize clients
-    embedding_client = OpenAI(base_url=EMBEDDING_BASE_URL, api_key="dummy")
-    milvus_client = MilvusClient(uri=MILVUS_URI, token=MILVUS_TOKEN)
-
-    # Ensure collection exists
-    ensure_collection_exists(milvus_client)
-
-    # Parse change log to identify files to create, modify, and delete
-    files_to_create, files_to_modify, files_to_delete = parse_change_log()
-    
-    log_message(f"Found {len(files_to_create)} files to create, {len(files_to_modify)} files to modify, and {len(files_to_delete)} files to delete")
-
-    # Process files to create
-    for filename in files_to_create:
-        try:
-            full_path = os.path.join("/workspace/files/", filename)
-            with open(full_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                insert_document(filename, content, milvus_client, embedding_client)
-        except Exception as e:
-            logger.error(f"Error processing file {filename} for creation: {e}")
-    
-    # Process files to modify
-    for filename in files_to_modify:
-        try:
-            full_path = os.path.join("/workspace/files/", filename)
-            with open(full_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                update_document(filename, content, milvus_client, embedding_client)
-        except Exception as e:
-            logger.error(f"Error processing file {filename} for modification: {e}")
-    
-    # Process files to delete
-    for filename in files_to_delete:
-        try:
-            delete_document(filename, milvus_client)
-        except Exception as e:
-            logger.error(f"Error processing file {filename} for deletion: {e}")
-
-    # Update the s3_files.txt with the new version
     try:
-        shutil.move("/workspace/s3_files.txt.new", "/workspace/s3_files.txt")
-        log_message("Updated s3_files.txt with new version")
-    except Exception as e:
-        logger.error(f"Error updating s3_files.txt: {e}")
+        # Initialize clients
+        logger.info("Initializing clients...")
+        embedding_client = OpenAI(base_url=EMBEDDING_BASE_URL, api_key="dummy")
+        milvus_client = MilvusClient(uri=MILVUS_URI, token=MILVUS_TOKEN)
+        logger.info("Clients initialized successfully")
 
-    log_message("Workflow completed successfully")
+        # Setup Milvus collection
+        logger.info("Setting up Milvus collection...")
+        setup_milvus(milvus_client)
+
+        # Load documents
+        logger.info("Loading documents...")
+        documents = load_documents()
+        logger.info(f"Loaded {len(documents)} documents")
+
+        # Process each document individually
+        for filename, content in documents.items():
+            logger.info(
+                f"Processing document {filename} ({len(content)} bytes)")
+            process_document(filename, content, milvus_client,
+                             embedding_client)
+
+        logger.info("=== update-data.py workflow completed successfully ===")
+    except Exception as e:
+        logger.error(f"Workflow failed with error: {e}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":

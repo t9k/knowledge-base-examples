@@ -1,96 +1,56 @@
 #!/bin/sh
 
-# This script fetches files from S3 bucket and tracks changes for incremental deployment
+# This script fetches files from S3 bucket
 # It uses the following environment variables from configmap:
 # - S3_PATH: S3 path pattern for matching files
 
-set -ex
+set -e
 
 # Load environment variables
 if [ -f /env-config/env.properties ]; then
   source /env-config/env.properties
 fi
 
+# Log script start with timestamp
+echo "$(date +'%Y-%m-%d %H:%M:%S') - Starting sync-files.sh script"
+
 # Extract bucket name from S3_PATH
 S3_BUCKET=$(echo "$S3_PATH" | cut -d'/' -f3)
 S3_PREFIX=$(echo "$S3_PATH" | cut -d'/' -f4-)
 
+echo "S3 bucket: ${S3_BUCKET}"
+echo "S3 prefix: ${S3_PREFIX}"
+
 # Copy rclone config
 mkdir -p /root/.config/rclone
 cp /s3cfg/rclone.conf /root/.config/rclone/rclone.conf
+echo "Rclone config copied"
 
 # Create workspace directory
 mkdir -p /workspace/files
-
-# Create log file if it doesn't exist, otherwise append to it
-LOG_FILE="/workspace/log.txt"
-if [ ! -f $LOG_FILE ]; then
-  echo -e "\n\n====================SYNC_BOUNDARY====================" > $LOG_FILE
-  echo "--- Sync Files $(date) ---" >> $LOG_FILE
-else
-  echo -e "\n\n====================SYNC_BOUNDARY====================" >> $LOG_FILE
-  echo "--- Sync Files $(date) ---" >> $LOG_FILE
-fi
-
-# Create s3_files.txt if it doesn't exist (first run case)
-if [ ! -f /workspace/s3_files.txt ]; then
-  echo "First run detected, creating empty s3_files.txt file" | tee -a $LOG_FILE
-  touch /workspace/s3_files.txt
-fi
+echo "Workspace directories created"
 
 # Sync only .txt and .md files
-echo "Syncing .txt and .md files from S3 path ${S3_PATH}..." | tee -a $LOG_FILE
+echo "$(date +'%Y-%m-%d %H:%M:%S') - Syncing .txt and .md files from S3 path ${S3_PATH}..."
 rclone sync --config /root/.config/rclone/rclone.conf --include "*.txt" --include "*.md" minio:${S3_BUCKET}/${S3_PREFIX} /workspace/files/
+echo "$(date +'%Y-%m-%d %H:%M:%S') - File sync completed"
 
-# Create s3_files.txt.new with file paths and modification date/time
-echo "Creating list of all files with modification times..." | tee -a $LOG_FILE
-> /workspace/s3_files.txt.new
+# Create s3_file_list.txt with file paths and modification date/time
+echo "$(date +'%Y-%m-%d %H:%M:%S') - Creating list of all files with modification times..."
+> /workspace/s3_file_list.txt
 rclone lsl --config /root/.config/rclone/rclone.conf --include "*.txt" --include "*.md" minio:${S3_BUCKET}/${S3_PREFIX} | while read -r line; do
   file=$(echo "$line" | awk '{print $4}')
   mod_date=$(echo "$line" | awk '{print $2}')
   mod_time=$(echo "$line" | awk '{print $3}')
-  echo "${file} ${mod_date} ${mod_time}" >> /workspace/s3_files.txt.new
+  echo "${file} ${mod_date} ${mod_time}" >> /workspace/s3_file_list.txt
 done
-
-# Identify changes between current and new file lists
-echo "Identifying file changes for incremental update..." | tee -a $LOG_FILE
-
-# Find created and modified files
-while read -r line; do
-  file=$(echo "$line" | awk '{print $1}')
-  old_file_exists=$(grep -q "^${file} " /workspace/s3_files.txt && echo "yes" || echo "no")
-  
-  if [ "$old_file_exists" = "no" ]; then
-    # File is newly created
-    echo "TO_CREATE: $file" | tee -a $LOG_FILE
-  else
-    # Check if file was modified
-    old_mod_date=$(grep "^${file} " /workspace/s3_files.txt | awk '{print $2}')
-    old_mod_time=$(grep "^${file} " /workspace/s3_files.txt | awk '{print $3}')
-    new_mod_date=$(grep "^${file} " /workspace/s3_files.txt.new | awk '{print $2}')
-    new_mod_time=$(grep "^${file} " /workspace/s3_files.txt.new | awk '{print $3}')
-    
-    if [ "$old_mod_date" != "$new_mod_date" ] || [ "$old_mod_time" != "$new_mod_time" ]; then
-      echo "TO_MODIFY: $file" | tee -a $LOG_FILE
-    fi
-  fi
-done < /workspace/s3_files.txt.new
-
-# Find deleted files - read from old file list and check against new file list
-while read -r line; do
-  file=$(echo "$line" | awk '{print $1}')
-  new_file_exists=$(grep -q "^${file} " /workspace/s3_files.txt.new && echo "yes" || echo "no")
-  
-  if [ "$new_file_exists" = "no" ]; then
-    # File was deleted
-    echo "TO_DELETE: $file" | tee -a $LOG_FILE
-  fi
-done < /workspace/s3_files.txt
+echo "$(date +'%Y-%m-%d %H:%M:%S') - File list created at /workspace/s3_file_list.txt"
 
 # List synced files
-echo "Synced files:" | tee -a $LOG_FILE
-ls -l /workspace/files/ | tee -a $LOG_FILE
+echo "$(date +'%Y-%m-%d %H:%M:%S') - Synced files:"
+ls -la /workspace/files/
 
 # Print stats
-echo "Files synced: $(wc -l < /workspace/s3_files.txt.new)" | tee -a $LOG_FILE
-echo "Changes complete. New files list created but not applied yet." | tee -a $LOG_FILE
+FILE_COUNT=$(wc -l < /workspace/s3_file_list.txt)
+echo "$(date +'%Y-%m-%d %H:%M:%S') - Files synced: ${FILE_COUNT}"
+echo "$(date +'%Y-%m-%d %H:%M:%S') - sync-files.sh completed successfully"

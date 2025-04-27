@@ -6,15 +6,14 @@ spec:
   entrypoint: sync-and-process
   arguments:
     parameters:
+      - name: database-name
+        description: "Milvus database name to use"
       - name: collection-name
-        description: "Milvus collection name to create/use"
+        description: "Milvus collection name to create"
   volumes:
     - name: rclone
-      configMap:
-        name: rclone-config
-        items:
-          - key: rclone.conf
-            path: rclone.conf
+      secret:
+        secretName: rclone-s3-config
     - name: workspace
       persistentVolumeClaim:
         claimName: incremental-release-pvc
@@ -28,37 +27,95 @@ spec:
             template: prepare
         - - name: sync-files
             template: sync-files
+            arguments:
+              parameters:
+                - name: log-timestamp
+                  value: "{{steps.prepare.outputs.parameters.log-timestamp}}"
         - - name: update-data
             template: update-data
             arguments:
               parameters:
+                - name: database-name
+                  value: "{{workflow.parameters.database-name}}"
                 - name: collection-name
                   value: "{{workflow.parameters.collection-name}}"
+                - name: log-timestamp
+                  value: "{{steps.prepare.outputs.parameters.log-timestamp}}"
 
     - name: prepare
+      outputs:
+        parameters:
+          - name: log-timestamp
+            valueFrom:
+              path: /tmp/log-timestamp.txt
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
         command: [sh, -c]
         args:
           - |
-            set -ex
+            set -e
+
+            # Create logs directory
+            mkdir -p /workspace/logs
+
+            # Generate timestamp for log filename
+            TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+            echo -n "${TIMESTAMP}" > /tmp/log-timestamp.txt
+            LOG_DIR="/workspace/logs/incremental-release_${TIMESTAMP}"
+            mkdir -p "$LOG_DIR"
+            LOG_FILE="$LOG_DIR/log.txt"
+            
+            # Start logging
+            exec > >(tee -a "${LOG_FILE}") 2>&1
+            echo "=== Starting incremental-release workflow at $(date) ==="
+            echo "=== Preparing workspace ==="
+
+            # Validate database and collection names
+            DATABASE_NAME="{{workflow.parameters.database-name}}"
+            if ! [[ $DATABASE_NAME =~ ^[a-zA-Z0-9_]+$ ]]; then
+              echo "Error: Database name '$DATABASE_NAME' is invalid. Database names can only contain numbers, letters, and underscores."
+              exit 1
+            fi
+
+            COLLECTION_NAME="{{workflow.parameters.collection-name}}"
+            if ! [[ $COLLECTION_NAME =~ ^[a-zA-Z0-9_]+$ ]]; then
+              echo "Error: Collection name '$COLLECTION_NAME' is invalid. Collection names can only contain numbers, letters, and underscores."
+              exit 1
+            fi
+
+            echo "Database name: $DATABASE_NAME"
+            echo "Collection name: $COLLECTION_NAME"
+
             git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
             mkdir -p /workspace/scripts
             cp /tmp/repo/argo-workflows/incremental-release/*.sh /workspace/scripts/
             cp /tmp/repo/argo-workflows/incremental-release/*.py /workspace/scripts/
+            
+            echo "=== Prepare step completed at $(date) ==="
         volumeMounts:
           - name: workspace
             mountPath: /workspace
 
     - name: sync-files
+      inputs:
+        parameters:
+          - name: log-timestamp
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
         command: [sh, -c]
         args:
           - |
-            set -ex
+            set -e
+            LOG_DIR="/workspace/logs/incremental-release_{{inputs.parameters.log-timestamp}}"
+            LOG_FILE="$LOG_DIR/log.txt"
+            mkdir -p "$LOG_DIR"
+            exec > >(tee -a "${LOG_FILE}") 2>&1
+            echo "=== Starting sync-files step at $(date) ==="
+            
             chmod +x /workspace/scripts/sync-files.sh
             /workspace/scripts/sync-files.sh
+            
+            echo "=== Sync-files step completed at $(date) ==="
         volumeMounts:
           - name: rclone
             mountPath: /s3cfg
@@ -66,31 +123,36 @@ spec:
             mountPath: /workspace
           - name: env-config
             mountPath: /env-config
- 
+
     - name: update-data
       inputs:
         parameters:
+          - name: database-name
           - name: collection-name
+          - name: log-timestamp
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/python:3.10-milvus
         command: [/bin/bash, -c]
         args:
           - |
-            set -ex
+            set -e
+            LOG_DIR="/workspace/logs/incremental-release_{{inputs.parameters.log-timestamp}}"
+            LOG_FILE="$LOG_DIR/log.txt"
+            mkdir -p "$LOG_DIR"
+            exec > >(tee -a "${LOG_FILE}") 2>&1
+            echo "=== Starting update-data step at $(date) ==="
+            
             chmod +x /workspace/scripts/update-data.py
+            export DATABASE_NAME="{{inputs.parameters.database-name}}"
             export COLLECTION_NAME="{{inputs.parameters.collection-name}}"
-            source /env-config/env.properties
-            export S3_PATH
-            export MILVUS_URI
-            export MILVUS_TOKEN
-            export EMBEDDING_BASE_URL
-            export EMBEDDING_MODEL
-            export EMBEDDING_DIM
-            python /workspace/scripts/update-data.py
+            export LOG_FILE="${LOG_FILE}"
+            export LOG_DIR="${LOG_DIR}"
+            /workspace/scripts/update-data.py
+            
+            echo "=== Update-data step completed at $(date) ==="
+            echo "=== Workflow completed successfully at $(date) ==="
         volumeMounts:
-          - name: rclone
-            mountPath: /s3cfg
           - name: workspace
             mountPath: /workspace
           - name: env-config
-            mountPath: /env-config 
+            mountPath: /env-config

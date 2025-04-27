@@ -4,34 +4,61 @@ Script to process text files, chunk them, create embeddings, and store them in M
 This script implements the full deployment workflow for inserting data into a Milvus collection.
 
 Environment variables:
-- COLLECTION_NAME: Name of the Milvus collection to create/use
+- DATABASE_NAME: Name of the Milvus database to use
+- COLLECTION_NAME: Name of the Milvus collection to create
 - MILVUS_URI: Milvus connection URI
 - EMBEDDING_BASE_URL: Base URL for the embedding model API
 - EMBEDDING_MODEL: Name of the embedding model to use
 - EMBEDDING_DIM: Dimension of the embedding vectors
+- LOG_FILE: Optional path to the log file
 """
 
 import os
 import glob
+import sys
 from typing import List, Dict, Any
 import logging
+from dotenv import load_dotenv
 
 from tqdm import tqdm
 from openai import OpenAI
 from pymilvus import MilvusClient, DataType
 
 # Set up logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+# Check if LOG_FILE environment variable is set
+log_file = os.environ.get("LOG_FILE")
+if log_file:
+    # When running in the workflow with tee redirecting output to a log file,
+    # only use StreamHandler to avoid duplicate logs
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s',
+                        handlers=[logging.StreamHandler(sys.stdout)])
+else:
+    # Default logging setup
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables
+load_dotenv("/env-config/env.properties")
+DATABASE_NAME = os.environ.get("DATABASE_NAME")
 COLLECTION_NAME = os.environ.get("COLLECTION_NAME")
 MILVUS_URI = os.environ.get("MILVUS_URI")
 MILVUS_TOKEN = os.environ.get("MILVUS_TOKEN")
 EMBEDDING_BASE_URL = os.environ.get("EMBEDDING_BASE_URL")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL")
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM"))
+
+# Log environment variables
+logger.info("=== insert-data.py environment ===")
+logger.info(f"DATABASE_NAME: {DATABASE_NAME}")
+logger.info(f"COLLECTION_NAME: {COLLECTION_NAME}")
+logger.info(f"MILVUS_URI: {MILVUS_URI}")
+logger.info(f"EMBEDDING_BASE_URL: {EMBEDDING_BASE_URL}")
+logger.info(f"EMBEDDING_MODEL: {EMBEDDING_MODEL}")
+logger.info(f"EMBEDDING_DIM: {EMBEDDING_DIM}")
+logger.info(f"LOG_FILE: {log_file}")
 
 # Constants
 CHUNK_SIZE = 512  # Token size for each chunk
@@ -64,6 +91,8 @@ def load_documents() -> Dict[str, str]:
                     relative_path = os.path.relpath(file_path,
                                                     "/workspace/files/")
                     file_contents[relative_path] = content
+                    logger.debug(
+                        f"Loaded file: {relative_path} ({len(content)} bytes)")
         except Exception as e:
             logger.error(f"Error loading file {file_path}: {e}")
 
@@ -129,13 +158,8 @@ def create_embedding(text: str, client: OpenAI) -> List[float]:
     Returns:
         Embedding vector
     """
-    try:
-        response = client.embeddings.create(input=text, model=EMBEDDING_MODEL)
-        return response.data[0].embedding
-    except Exception as e:
-        logger.error(f"Error creating embedding: {e}")
-        # Return a zero vector as fallback
-        return [0.0] * EMBEDDING_DIM
+    response = client.embeddings.create(input=text, model=EMBEDDING_MODEL)
+    return response.data[0].embedding
 
 
 def setup_milvus(client: MilvusClient) -> None:
@@ -144,6 +168,15 @@ def setup_milvus(client: MilvusClient) -> None:
     Args:
         client: Milvus client instance
     """
+    if DATABASE_NAME not in client.list_databases():
+        logger.error(f"Database {DATABASE_NAME} does not exist")
+        raise RuntimeError(
+            f"Database {DATABASE_NAME} does not exist. Please create the database manually."
+        )
+
+    client.using_database(DATABASE_NAME)
+    logger.info(f"Using database: {DATABASE_NAME}")
+
     # Check if collection exists
     if client.has_collection(COLLECTION_NAME):
         logger.error(f"Collection {COLLECTION_NAME} already exists")
@@ -179,6 +212,7 @@ def setup_milvus(client: MilvusClient) -> None:
     client.create_collection(collection_name=COLLECTION_NAME,
                              schema=schema,
                              index_params=index_params)
+    logger.info(f"Collection {COLLECTION_NAME} created successfully")
 
 
 def process_documents(documents: Dict[str, str], milvus_client: MilvusClient,
@@ -194,7 +228,7 @@ def process_documents(documents: Dict[str, str], milvus_client: MilvusClient,
 
     logger.info(f"Processing {len(documents)} documents")
     for filename, content in documents.items():
-        logger.info(f"Processing document: {filename}")
+        logger.info(f"Processing document: {filename} ({len(content)} bytes)")
         chunks = chunk_text(content, filename)
         all_chunks.extend(chunks)
 
@@ -213,7 +247,7 @@ def process_documents(documents: Dict[str, str], milvus_client: MilvusClient,
     # Insert data into Milvus
     if milvus_data:
         logger.info(
-            f"Inserting {len(milvus_data)} documents into Milvus collection {COLLECTION_NAME}"
+            f"Inserting {len(milvus_data)} chunks into Milvus collection {COLLECTION_NAME}"
         )
         milvus_client.insert(COLLECTION_NAME, milvus_data)
         logger.info("Data insertion complete")
@@ -223,20 +257,30 @@ def process_documents(documents: Dict[str, str], milvus_client: MilvusClient,
 
 def main():
     """Main function to run the data processing and insertion workflow."""
-    logger.info("Starting insert-data workflow")
+    logger.info("=== Starting insert-data workflow ===")
 
-    # Initialize clients
-    embedding_client = OpenAI(base_url=EMBEDDING_BASE_URL, api_key="dummy")
-    milvus_client = MilvusClient(uri=MILVUS_URI, token=MILVUS_TOKEN)
+    try:
+        # Initialize clients
+        logger.info("Initializing clients...")
+        embedding_client = OpenAI(base_url=EMBEDDING_BASE_URL, api_key="dummy")
+        milvus_client = MilvusClient(uri=MILVUS_URI, token=MILVUS_TOKEN)
+        logger.info("Clients initialized successfully")
 
-    # Setup Milvus collection
-    setup_milvus(milvus_client)
+        # Setup Milvus collection
+        logger.info("Setting up Milvus collection...")
+        setup_milvus(milvus_client)
 
-    # Load and process documents
-    documents = load_documents()
-    process_documents(documents, milvus_client, embedding_client)
+        # Load and process documents
+        logger.info("Loading documents...")
+        documents = load_documents()
+        logger.info(f"Loaded {len(documents)} documents")
 
-    logger.info("Workflow completed successfully")
+        process_documents(documents, milvus_client, embedding_client)
+
+        logger.info("=== insert-data workflow completed successfully ===")
+    except Exception as e:
+        logger.error(f"Workflow failed with error: {e}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
