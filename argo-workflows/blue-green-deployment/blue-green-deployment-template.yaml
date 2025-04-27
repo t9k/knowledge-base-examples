@@ -1,0 +1,161 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: blue-green-deployment
+spec:
+  entrypoint: sync-and-process
+  arguments:
+    parameters:
+      - name: database-name
+        description: "Database name for blue-green deployment"
+  volumes:
+    - name: rclone
+      configMap:
+        name: rclone-config
+        items:
+          - key: rclone.conf
+            path: rclone.conf
+    - name: workspace
+      persistentVolumeClaim:
+        claimName: blue-green-deployment-pvc
+    - name: env-config
+      configMap:
+        name: blue-green-deployment-config
+  templates:
+    - name: sync-and-process
+      steps:
+        - - name: prepare
+            template: prepare
+        - - name: sync-files
+            template: sync-files
+        - - name: publish-release
+            template: publish-release
+            arguments:
+              parameters:
+                - name: database-name
+                  value: "{{workflow.parameters.database-name}}"
+        - - name: maintain-releases
+            template: maintain-releases
+            arguments:
+              parameters:
+                - name: database-name
+                  value: "{{workflow.parameters.database-name}}"
+
+    - name: prepare
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh, -c]
+        args:
+          - |
+            set -ex
+            
+            # Validate database name
+            DATABASE_NAME="{{workflow.parameters.database-name}}"
+            if ! [[ $DATABASE_NAME =~ ^[a-zA-Z0-9_]+$ ]]; then
+              echo "Error: Database name '$DATABASE_NAME' is invalid. Database names can only contain numbers, letters, and underscores."
+              exit 1
+            fi
+            
+            # Check env config for valid collection names
+            if [ -f /env-config/env.properties ]; then
+              source /env-config/env.properties
+              if [ -n "$COLLECTION_NAME_TEXT" ] && ! [[ $COLLECTION_NAME_TEXT =~ ^[a-zA-Z0-9_]+$ ]]; then
+                echo "Error: COLLECTION_NAME_TEXT='$COLLECTION_NAME_TEXT' is invalid. Collection names can only contain numbers, letters, and underscores."
+                exit 1
+              fi
+              if [ -n "$COLLECTION_NAME_IMAGE" ] && ! [[ $COLLECTION_NAME_IMAGE =~ ^[a-zA-Z0-9_]+$ ]]; then
+                echo "Error: COLLECTION_NAME_IMAGE='$COLLECTION_NAME_IMAGE' is invalid. Collection names can only contain numbers, letters, and underscores."
+                exit 1
+              fi
+            fi
+            
+            git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
+            mkdir -p /workspace/scripts
+            cp /tmp/repo/argo-workflows/blue-green-deployment/*.sh /workspace/scripts/
+            cp /tmp/repo/argo-workflows/blue-green-deployment/*.py /workspace/scripts/
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+
+    - name: sync-files
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh, -c]
+        args:
+          - |
+            set -ex
+            chmod +x /workspace/scripts/sync-files.sh
+            /workspace/scripts/sync-files.sh
+        volumeMounts:
+          - name: rclone
+            mountPath: /s3cfg
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+ 
+    - name: publish-release
+      inputs:
+        parameters:
+          - name: database-name
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/pytorch:2.7.0-milvus-timm
+        command: [/bin/bash, -c]
+        args:
+          - |
+            set -ex
+            
+            # Run the insertion script
+            chmod +x /workspace/scripts/publish-release.py
+            export DATABASE_NAME="{{inputs.parameters.database-name}}"
+            source /env-config/env.properties
+            export S3_PATH_TEXT
+            export S3_PATH_IMAGE
+            export COLLECTION_NAME_TEXT
+            export COLLECTION_NAME_IMAGE
+            export MILVUS_URI
+            export MILVUS_TOKEN
+            export TEXT_EMBEDDING_BASE_URL
+            export TEXT_EMBEDDING_MODEL
+            export TEXT_EMBEDDING_DIM
+            export IMAGE_EMBEDDING_MODEL
+            export IMAGE_EMBEDDING_DIM
+            python /workspace/scripts/publish-release.py
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+        resources:
+          requests:
+            memory: 8Gi
+            cpu: 4
+          limits:
+            memory: 16Gi
+            cpu: 8
+
+    - name: maintain-releases
+      inputs:
+        parameters:
+          - name: database-name
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/python:3.10-milvus
+        command: [/bin/bash, -c]
+        args:
+          - |
+            set -ex
+            # Run the maintain history script
+            chmod +x /workspace/scripts/maintain-releases.py
+            export DATABASE_NAME="{{inputs.parameters.database-name}}"
+            source /env-config/env.properties
+            export MILVUS_URI
+            export MILVUS_TOKEN
+            export HISTORY_RELEASES_TO_KEEP
+            python /workspace/scripts/maintain-releases.py
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config

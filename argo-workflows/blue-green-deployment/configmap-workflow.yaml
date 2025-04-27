@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blue-green-deployment-config
+data:
+  env.properties: |
+    S3_PATH_TEXT="s3://my-bucket/path/to/text"
+    S3_PATH_IMAGE="s3://my-bucket/path/to/image"
+    COLLECTION_NAME_TEXT="text_embeddings"
+    COLLECTION_NAME_IMAGE="image_embeddings"
+    MILVUS_URI="http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
+    MILVUS_TOKEN="root:Milvus"
+    TEXT_EMBEDDING_BASE_URL="http://app-vllm-xxxxxxxx.namespace.ksvc.tensorstack.net/v1"
+    TEXT_EMBEDDING_MODEL="bge-m3"
+    TEXT_EMBEDDING_DIM=1024
+    IMAGE_EMBEDDING_MODEL="vit_so400m_patch16_siglip_384.v2_webli"
+    IMAGE_EMBEDDING_DIM=1152
+    HISTORY_RELEASES_TO_KEEP=5
