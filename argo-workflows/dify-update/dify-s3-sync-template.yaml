@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: dify-s3-sync-blue-green
+  name: dify-s3-sync
 spec:
   entrypoint: sync-docs
   arguments:
@@ -10,10 +10,8 @@ spec:
         description: "Dify API host"
       - name: api-key
         description: "Dify API key"
-      - name: dataset-id-blue
-        description: "Blue dataset ID"
-      - name: dataset-id-green
-        description: "Green dataset ID"
+      - name: dataset-id
+        description: "Target dataset ID"
       - name: s3-bucket
         description: "S3 bucket name"
       - name: alway-push-all-files
@@ -32,8 +30,8 @@ spec:
   templates:
     - name: sync-docs
       steps:
-        - - name: prepare
-            template: prepare
+        - - name: pull-scripts
+            template: pull-scripts
         - - name: fetch-dify-docs
             template: fetch-dify-docs
             arguments:
@@ -42,12 +40,8 @@ spec:
                   value: "{{workflow.parameters.host}}"
                 - name: api-key
                   value: "{{workflow.parameters.api-key}}"
-                - name: dataset-id-blue
-                  value: "{{workflow.parameters.dataset-id-blue}}"
-                - name: dataset-id-green
-                  value: "{{workflow.parameters.dataset-id-green}}"
-                - name: active-env
-                  value: "{{steps.prepare.outputs.result}}"
+                - name: dataset-id
+                  value: "{{workflow.parameters.dataset-id}}"
           - name: sync-s3-files
             template: sync-s3-files
             arguments:
@@ -56,8 +50,6 @@ spec:
                   value: "{{workflow.parameters.alway-push-all-files}}"
                 - name: s3-bucket
                   value: "{{workflow.parameters.s3-bucket}}"
-                - name: active-env
-                  value: "{{steps.prepare.outputs.result}}"
         - - name: update-dify-knowledge-base
             template: update-dify-knowledge-base
             arguments:
@@ -66,30 +58,21 @@ spec:
                   value: "{{workflow.parameters.host}}"
                 - name: api-key
                   value: "{{workflow.parameters.api-key}}"
-                - name: dataset-id-blue
-                  value: "{{workflow.parameters.dataset-id-blue}}"
-                - name: dataset-id-green
-                  value: "{{workflow.parameters.dataset-id-green}}"
+                - name: dataset-id
+                  value: "{{workflow.parameters.dataset-id}}"
                 - name: alway-push-all-files
                   value: "{{workflow.parameters.alway-push-all-files}}"
-                - name: active-env
-                  value: "{{steps.prepare.outputs.result}}"
 
-    - name: prepare
+    - name: pull-scripts
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
         command: [sh, -c]
         args:
           - |
             set -ex
-            # Pull scripts from Git repo
             git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
             mkdir -p /workspace/scripts
-            cp /tmp/repo/argo-workflows/blue-green/*.sh /workspace/scripts/
-
-            chmod +x /workspace/scripts/determine-active-env.sh
-            /workspace/scripts/determine-active-env.sh
-
+            cp /tmp/repo/argo-workflows/dify-update/*.sh /workspace/scripts/
         volumeMounts:
           - name: workspace
             mountPath: /workspace
@@ -99,20 +82,15 @@ spec:
         parameters:
           - name: alway-push-all-files
           - name: s3-bucket
-          - name: active-env
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
         command: [sh, -c]
         args:
           - |
             set -ex
-            ACTIVE_ENV="{{inputs.parameters.active-env}}"
-            mkdir -p /workspace/$ACTIVE_ENV
             chmod +x /workspace/scripts/sync-s3-files.sh
             export ALWAY_PUSH_ALL_FILES="{{inputs.parameters.alway-push-all-files}}"
             export S3_BUCKET="{{inputs.parameters.s3-bucket}}"
-            export WORKSPACE_DIR="/workspace/$ACTIVE_ENV"
-            cd /workspace/$ACTIVE_ENV
             /workspace/scripts/sync-s3-files.sh
         volumeMounts:
           - name: rclone
@@ -125,29 +103,17 @@ spec:
         parameters:
           - name: host
           - name: api-key
-          - name: dataset-id-blue
-          - name: dataset-id-green
-          - name: active-env
+          - name: dataset-id
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
         command: [sh, -c]
         args:
           - |
             set -ex
-            ACTIVE_ENV="{{inputs.parameters.active-env}}"
-            mkdir -p /workspace/$ACTIVE_ENV
             chmod +x /workspace/scripts/fetch-dify-docs.sh
             export HOST="{{inputs.parameters.host}}"
             export API_KEY="{{inputs.parameters.api-key}}"
-            
-            if [ "$ACTIVE_ENV" = "blue" ]; then
-              export DATASET_ID="{{inputs.parameters.dataset-id-blue}}"
-            else
-              export DATASET_ID="{{inputs.parameters.dataset-id-green}}"
-            fi
-            
-            export WORKSPACE_DIR="/workspace/$ACTIVE_ENV"
-            cd /workspace/$ACTIVE_ENV
+            export DATASET_ID="{{inputs.parameters.dataset-id}}"
             /workspace/scripts/fetch-dify-docs.sh
         volumeMounts:
           - name: workspace
@@ -158,31 +124,19 @@ spec:
         parameters:
           - name: host
           - name: api-key
-          - name: dataset-id-blue
-          - name: dataset-id-green
+          - name: dataset-id
           - name: alway-push-all-files
-          - name: active-env
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
         command: [sh, -c]
         args:
           - |
             set -ex
-            ACTIVE_ENV="{{inputs.parameters.active-env}}"
-            mkdir -p /workspace/$ACTIVE_ENV
             chmod +x /workspace/scripts/update-dify-knowledge-base.sh
             export HOST="{{inputs.parameters.host}}"
             export API_KEY="{{inputs.parameters.api-key}}"
-            
-            if [ "$ACTIVE_ENV" = "blue" ]; then
-              export DATASET_ID="{{inputs.parameters.dataset-id-blue}}"
-            else
-              export DATASET_ID="{{inputs.parameters.dataset-id-green}}"
-            fi
-            
+            export DATASET_ID="{{inputs.parameters.dataset-id}}"
             export ALWAY_PUSH_ALL_FILES="{{inputs.parameters.alway-push-all-files}}"
-            export WORKSPACE_DIR="/workspace/$ACTIVE_ENV"
-            cd /workspace/$ACTIVE_ENV
             /workspace/scripts/update-dify-knowledge-base.sh
         volumeMounts:
           - name: rclone
