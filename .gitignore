@@ -12,3 +12,6 @@ local-test
 
 # Python generated files
 *.egg-info/
+
+# Dataset
+final_all_data/
