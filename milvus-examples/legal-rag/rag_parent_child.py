@@ -9,12 +9,15 @@ from openai import OpenAI
 import argparse
 
 MILVUS_URI = "http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
-COLLECTION_NAME = "law_hybrid_demo"
+PARENT_COLLECTION_NAME = "law_hybrid_demo_parent"
+CHILD_COLLECTION_NAME = "law_hybrid_demo_child"
 
 CHAT_BASE_URL = "http://app-vllm-xxxxxxxx.namespace.ksvc.tensorstack.net/v1"
 CHAT_MODEL = "Qwen2.5-7B-Instruct"
 SYSTEM_PROMPT = """你是一名法律智能助手，擅长根据提供的刑事案件案情描述和事实上下文，准确、简明地回答用户提出的刑事法律问题。你的回答应基于上下文信息，条理清晰、专业可靠，避免主观臆断，不可凭空编造。"""
 TOP_K = 5
+RRF_K = 60
+RETRIEVE_PARENT_THRESHOLD = 0.3
 
 
 def hybrid_search(col, query_dense_embedding, query_sparse_embedding, limit):
@@ -28,12 +31,13 @@ def hybrid_search(col, query_dense_embedding, query_sparse_embedding, limit):
                                   "sparse_vector",
                                   sparse_search_params,
                                   limit=limit)
-    rerank = RRFRanker(60)
+    rerank = RRFRanker(RRF_K)
     res = col.hybrid_search([sparse_req, dense_req],
                             rerank=rerank,
                             limit=limit,
                             output_fields=[
-                                "chunk", "relevant_articles", "accusation",
+                                "child_id", "parent_id", "fact_id", "chunk",
+                                "relevant_articles", "accusation",
                                 "punish_of_money", "criminal", "imprisonment",
                                 "life_imprisonment", "death_penalty"
                             ])[0]
@@ -86,19 +90,37 @@ def main():
     ef = BGEM3EmbeddingFunction(use_fp16=False, device="cpu")
     query_embeddings = ef([query])
     connections.connect(uri=MILVUS_URI, token="root:Milvus")
-    col = Collection(COLLECTION_NAME)
-    results = hybrid_search(
-        col,
+    parent_col = Collection(PARENT_COLLECTION_NAME)
+    child_col = Collection(CHILD_COLLECTION_NAME)
+    child_results = hybrid_search(
+        child_col,
         query_embeddings["dense"][0],
         query_embeddings["sparse"][[0]],
         limit=TOP_K,
     )
 
+    parent_ids = [hit.parent_id for hit in child_results]
+    expr = f'parent_id IN {parent_ids}'
+    parent_results = parent_col.query(expr=expr, output_fields=["chunk"])
+    parent_chunks = {
+        parent["parent_id"]: parent["chunk"]
+        for parent in parent_results
+    }
+
     chunks = []
     print("\nTop Results:")
-    for hit in results:
-        chunks.append(hit.chunk)
-        print(f"chunk: {hit.chunk}")
+    for hit in child_results:
+
+        # TODO: 根据阈值判断是否需要检索父文档
+        # score = hit.score / (2 / (RRF_K + 1))
+        # if score > RETRIEVE_PARENT_THRESHOLD:
+        #     chunk = hit.chunk
+        # else:
+        #     chunk = parent_chunks.get(hit.parent_id)
+
+        chunk = parent_chunks.get(hit.parent_id)
+        chunks.append(chunk)
+        print(f"chunk: {chunk}")
         print(f"  relevant_articles: {hit.relevant_articles}")
         print(f"  accusation: {hit.accusation}")
         print(f"  punish_of_money: {hit.punish_of_money}")
