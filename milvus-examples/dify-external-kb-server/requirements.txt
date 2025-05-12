@@ -1,0 +1,6 @@
+datasets==3.6.0
+flask==2.3.3
+peft==0.15.2
+pymilvus[model]==2.5.7
+requests==2.32.3
+werkzeug==3.1.3
