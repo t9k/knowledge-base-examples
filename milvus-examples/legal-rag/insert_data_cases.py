@@ -1,6 +1,5 @@
-import sys
+import argparse
 import os
-import glob
 import json
 import uuid
 from tqdm import tqdm
@@ -90,17 +89,15 @@ def record_generator(jsonl_path):
     for item in read_jsonl(jsonl_path):
         fact = item["fact"].replace(",", "，").replace(";", "；")
         meta = item["meta"]
-        chunks = chunk_text(fact) if len(fact) > CHUNK_SIZE else [fact]
 
+        chunks = chunk_text(fact) if len(fact) > CHUNK_SIZE else [fact]
         for chunk in chunks:
             if len(chunk) <= 3:
                 continue
 
-            yield {
-                "chunk_id":
-                str(uuid.uuid4()),
-                "chunk":
-                chunk,
+            
+
+            metadata = {
                 "relevant_articles":
                 [int(i) for i in meta["relevant_articles"]],
                 "accusation":
@@ -114,8 +111,10 @@ def record_generator(jsonl_path):
                 "life_imprisonment":
                 meta["term_of_imprisonment"]["life_imprisonment"],
                 "death_penalty":
-                meta["term_of_imprisonment"]["death_penalty"],
+                meta["term_of_imprisonment"]["death_penalty"]
             }
+
+            yield {"chunk_id": str(uuid.uuid4()), "chunk": chunk, **metadata}
 
 
 def insert_data_streaming(col, record_iter, ef, batch_size=BATCH_SIZE):
@@ -165,22 +164,27 @@ def insert_data_streaming(col, record_iter, ef, batch_size=BATCH_SIZE):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python insert_data.py <jsonl_file>")
-        return
+    parser = argparse.ArgumentParser(
+        description='Insert legal case data into Milvus')
+    parser.add_argument(
+        'jsonl_path',
+        help='Path to JSONL file or directory containing JSON files')
+    args = parser.parse_args()
 
-    path = sys.argv[1]
+    path = args.jsonl_path
+
     jsonl_files = []
-    
+
     if os.path.isdir(path):
         # 如果是目录，递归处理目录及子目录下所有的json文件
         for root, _, files in os.walk(path):
             for file in files:
                 if file.endswith('.json'):
                     jsonl_files.append(os.path.join(root, file))
-        
+
         if not jsonl_files:
-            print(f"No JSON files found in directory or subdirectories: {path}")
+            print(
+                f"No JSON files found in directory or subdirectories: {path}")
             return
         print(f"Found {len(jsonl_files)} JSON files to process")
     elif os.path.isfile(path):
@@ -194,12 +198,11 @@ def main():
     dense_dim = ef.dim["dense"]
     col = setup_milvus_collection(dense_dim)
 
-        
     # 处理每个文件
     for jsonl_path in jsonl_files:
         print(f"Processing file: {jsonl_path}")
         insert_data_streaming(col, record_generator(jsonl_path), ef)
-    
+
     print("All files processed successfully")
 
 
