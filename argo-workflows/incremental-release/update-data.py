@@ -17,13 +17,14 @@ import os
 import glob
 import datetime
 import sys
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Generator
 import logging
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 from tqdm import tqdm
 from openai import OpenAI
 from pymilvus import MilvusClient, DataType
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Set up logging
 # Check if LOG_FILE environment variable is set
@@ -64,107 +65,8 @@ logger.info(f"LOG_FILE: {log_file}")
 # Constants
 CHUNK_SIZE = 512  # Token size for each chunk
 CHUNK_OVERLAP = 64  # Token overlap between chunks
-
-
-def load_documents() -> Dict[str, str]:
-    """Load document files from workspace/files directory.
-    
-    Returns:
-        Dict mapping filenames to file contents
-    """
-    file_contents = {}
-
-    # Process all files (full deployment)
-    logger.info("Processing all files (full deployment)...")
-    file_pattern = ["/workspace/files/**/*.txt", "/workspace/files/**/*.md"]
-    files_to_process = []
-    for pattern in file_pattern:
-        files_to_process.extend(glob.glob(pattern, recursive=True))
-
-    logger.info(f"Found {len(files_to_process)} files to process")
-
-    # Load file contents
-    for file_path in files_to_process:
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                if content:
-                    relative_path = os.path.relpath(file_path,
-                                                    "/workspace/files/")
-                    file_contents[relative_path] = content
-                    logger.debug(
-                        f"Loaded file: {relative_path} ({len(content)} bytes)")
-        except Exception as e:
-            logger.error(f"Error loading file {file_path}: {e}")
-
-    return file_contents
-
-
-def chunk_text(text: str, filename: str,
-               last_modified: str) -> List[Dict[str, Any]]:
-    """Split text into chunks with metadata.
-    
-    Args:
-        text: Text content to chunk
-        filename: Source filename for metadata
-        last_modified: Last modification time of the file
-        
-    Returns:
-        List of chunk objects with text and metadata
-    """
-    # Simple chunking by paragraphs first, then by size
-    paragraphs = text.split("\n\n")
-    chunks = []
-    current_chunk = ""
-
-    for paragraph in paragraphs:
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-
-        # If adding this paragraph would exceed chunk size, save current chunk and start a new one
-        if len(current_chunk) + len(paragraph) > CHUNK_SIZE:
-            if current_chunk:
-                chunks.append({
-                    "text": current_chunk,
-                    "metadata": {
-                        "source": filename,
-                        "last_modified": last_modified
-                    }
-                })
-            current_chunk = paragraph
-        else:
-            # Add paragraph to current chunk with a separator if needed
-            if current_chunk:
-                current_chunk += "\n\n" + paragraph
-            else:
-                current_chunk = paragraph
-
-    # Add the final chunk if there's any content left
-    if current_chunk:
-        chunks.append({
-            "text": current_chunk,
-            "metadata": {
-                "source": filename,
-                "last_modified": last_modified
-            }
-        })
-
-    return chunks
-
-
-def create_embedding(text: str, client: OpenAI) -> List[float]:
-    """Create embedding for text using OpenAI API.
-    
-    Args:
-        text: Input text to embed
-        client: OpenAI client instance
-        
-    Returns:
-        Embedding vector
-    """
-    response = client.embeddings.create(input=text, model=EMBEDDING_MODEL)
-    return response.data[0].embedding
+CHUNK_BATCH_SIZE = 100  # Batch size for text processing
+FILE_BLOCK_SIZE = 1048576  # Block size for file reading
 
 
 def setup_milvus(client: MilvusClient) -> None:
@@ -221,6 +123,82 @@ def setup_milvus(client: MilvusClient) -> None:
         logger.info(f"Collection {COLLECTION_NAME} already exists")
 
 
+def create_embedding(text: str, client: OpenAI) -> List[float]:
+    """Create embedding for text using OpenAI API.
+    
+    Args:
+        text: Input text to embed
+        client: OpenAI client instance
+        
+    Returns:
+        Embedding vector
+    """
+    response = client.embeddings.create(input=text, model=EMBEDDING_MODEL)
+    return response.data[0].embedding
+
+
+def create_embeddings(texts: List[Dict[str, Any]],
+                      client: OpenAI) -> List[Dict[str, Any]]:
+    """Create embeddings for a batch of texts.
+    
+    Args:
+        texts: List of text chunks with metadata
+        client: OpenAI client instance
+        
+    Returns:
+        List of data entries with embeddings ready for Milvus
+    """
+    milvus_data = []
+    for chunk in tqdm(texts, desc="Creating embeddings"):
+        embedding = create_embedding(chunk["text"], client)
+        milvus_data.append({
+            "text": chunk["text"],
+            "source": chunk["metadata"]["source"],
+            "last_modified": chunk["metadata"]["last_modified"],
+            "vector": embedding
+        })
+    return milvus_data
+
+
+def find_document_files() -> List[str]:
+    """Find all document files that need to be processed.
+    
+    Returns:
+        List of file paths to process
+    """
+    logger.info("Finding all files to process...")
+    file_pattern = ["/workspace/files/**/*.txt", "/workspace/files/**/*.md"]
+    files_to_process = []
+    for pattern in file_pattern:
+        files_to_process.extend(glob.glob(pattern, recursive=True))
+
+    logger.info(f"Found {len(files_to_process)} files to process")
+    return files_to_process
+
+
+def stream_read_file(
+        file_path: str,
+        block_size: int = FILE_BLOCK_SIZE) -> Generator[str, None, None]:
+    """Stream read a file in chunks to avoid loading large files entirely into memory.
+    
+    Args:
+        file_path: Path to the file to read
+        block_size: Size of each block to read
+        
+    Yields:
+        Chunks of the file content
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            while True:
+                block = f.read(block_size)
+                if not block:
+                    break
+                yield block
+    except Exception as e:
+        logger.error(f"Error reading file {file_path}: {e}")
+
+
 def delete_by_source(source: str, milvus_client: MilvusClient) -> None:
     """Delete all records with the specified source from Milvus.
     
@@ -242,24 +220,84 @@ def delete_by_source(source: str, milvus_client: MilvusClient) -> None:
         logger.error(f"Error deleting records with source {source}: {e}")
 
 
-def process_document(filename: str, content: str, milvus_client: MilvusClient,
-                     embedding_client: OpenAI) -> None:
-    """Process a single document, create chunks, and store in Milvus.
+def stream_process_file(
+        file_path: str,
+        last_modified: str) -> Generator[Dict[str, Any], None, None]:
+    """Stream process a single file and yield text chunks.
+    
+    Args:
+        file_path: Path to the file to process
+        last_modified: Last modification time of the file
+        
+    Yields:
+        Chunk objects with text and metadata
+    """
+    relative_path = os.path.relpath(file_path, "/workspace/files/")
+    logger.info(f"Processing file: {relative_path}")
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        length_function=len,
+        is_separator_regex=False,
+    )
+
+    buffer = ""
+    chunk_count = 0
+
+    # Read the file in blocks and process incrementally
+    for block in stream_read_file(file_path):
+        buffer += block
+
+        if len(buffer) >= CHUNK_SIZE + CHUNK_OVERLAP:
+            # Create documents from the buffer
+            chunks = text_splitter.split_text(buffer)
+
+            # Yield all documents except the last one
+            for chunk in chunks[:-1]:
+                chunk_count += 1
+                yield {
+                    "text": chunk,
+                    "metadata": {
+                        "source": relative_path,
+                        "last_modified": last_modified
+                    }
+                }
+
+            # Keep the last document as the buffer for next iteration
+            if chunks:
+                buffer = chunks[-1]
+            else:
+                buffer = ""
+
+    # Process any remaining content in the buffer
+    if buffer.strip():
+        chunks = text_splitter.split_text(buffer)
+        for chunk in chunks:
+            chunk_count += 1
+            yield {
+                "text": chunk,
+                "metadata": {
+                    "source": relative_path,
+                    "last_modified": last_modified
+                }
+            }
+
+    logger.info(f"Created {chunk_count} chunks from {relative_path}")
+
+
+def check_file_needs_processing(filename: str, last_modified: str,
+                                milvus_client: MilvusClient) -> bool:
+    """Check if a file needs to be processed based on last_modified time.
     
     Args:
         filename: Source filename
-        content: Document content
+        last_modified: Last modification time of the file
         milvus_client: Milvus client instance
-        embedding_client: OpenAI client for embeddings
+        
+    Returns:
+        Boolean indicating if the file needs processing
     """
-    logger.info(f"Processing document: {filename}")
-
-    # Get last modified time of the file
-    file_path = os.path.join("/workspace/files/", filename)
-    last_modified = datetime.datetime.fromtimestamp(
-        os.path.getmtime(file_path)).isoformat()
-    logger.info(f"File last modified: {last_modified}")
-
     # First check if there are any entities with matching filename
     expr = f'source == "{filename}"'
     search_results = milvus_client.query(collection_name=COLLECTION_NAME,
@@ -267,58 +305,97 @@ def process_document(filename: str, content: str, milvus_client: MilvusClient,
                                          output_fields=["id", "last_modified"],
                                          limit=1)
 
-    # If no entities match the filename, proceed with normal processing
+    # If no entities match the filename, file needs processing
     if not search_results:
         logger.info(
-            f"No existing entities found for {filename}, proceeding with full processing"
-        )
-    else:
-        # Check if there are entities with matching filename AND last_modified
-        expr = f'source == "{filename}" AND last_modified == "{last_modified}"'
-        exact_match_results = milvus_client.query(
-            collection_name=COLLECTION_NAME,
-            filter=expr,
-            output_fields=["id"],
-            limit=1)
+            f"No existing entities found for {filename}, needs processing")
+        return True
 
-        # If entities with matching filename AND last_modified exist, skip processing
-        if exact_match_results:
+    # Check if there are entities with matching filename AND last_modified
+    expr = f'source == "{filename}" AND last_modified == "{last_modified}"'
+    exact_match_results = milvus_client.query(collection_name=COLLECTION_NAME,
+                                              filter=expr,
+                                              output_fields=["id"],
+                                              limit=1)
+
+    # If entities with matching filename AND last_modified exist, skip processing
+    if exact_match_results:
+        logger.info(
+            f"Found existing entities for {filename} with matching last_modified time, skipping processing"
+        )
+        return False
+
+    # If entities with matching filename exist but none with matching last_modified,
+    # delete entities with matching filename and process the file
+    logger.info(
+        f"Found existing entities for {filename} but with different last_modified time, needs reprocessing"
+    )
+    delete_by_source(filename, milvus_client)
+    return True
+
+
+def process_chunks_in_batches(milvus_client: MilvusClient,
+                              embedding_client: OpenAI) -> None:
+    """Process chunks in batches, create embeddings, and store in Milvus.
+    
+    Args:
+        milvus_client: Milvus client instance
+        embedding_client: OpenAI client for embeddings
+    """
+    files = find_document_files()
+    total_chunks_processed = 0
+    batch_chunks = []
+
+    for file_path in files:
+        # Get last modified time of the file
+        last_modified = datetime.datetime.fromtimestamp(
+            os.path.getmtime(file_path)).isoformat()
+
+        relative_path = os.path.relpath(file_path, "/workspace/files/")
+
+        # Check if the file needs processing
+        if not check_file_needs_processing(relative_path, last_modified,
+                                           milvus_client):
+            continue
+
+        # Stream process each file that needs processing
+        for chunk in stream_process_file(file_path, last_modified):
+            batch_chunks.append(chunk)
+
+            # When we have enough chunks, process and insert them
+            if len(batch_chunks) >= CHUNK_BATCH_SIZE:
+                logger.info(f"Processing batch of {len(batch_chunks)} chunks")
+
+                # Create embeddings for this batch
+                milvus_data = create_embeddings(batch_chunks, embedding_client)
+
+                # Insert into Milvus
+                if milvus_data:
+                    logger.info(
+                        f"Inserting {len(milvus_data)} chunks into Milvus collection {COLLECTION_NAME}"
+                    )
+                    milvus_client.insert(COLLECTION_NAME, milvus_data)
+
+                # Update counts and clear batch
+                total_chunks_processed += len(batch_chunks)
+                logger.info(
+                    f"Total chunks processed so far: {total_chunks_processed}")
+                batch_chunks = []
+
+    # Process any remaining chunks in the final batch
+    if batch_chunks:
+        logger.info(f"Processing final batch of {len(batch_chunks)} chunks")
+        milvus_data = create_embeddings(batch_chunks, embedding_client)
+
+        if milvus_data:
             logger.info(
-                f"Found existing entities for {filename} with matching last_modified time, skipping processing"
+                f"Inserting {len(milvus_data)} chunks into Milvus collection {COLLECTION_NAME}"
             )
-            return
+            milvus_client.insert(COLLECTION_NAME, milvus_data)
 
-        # If entities with matching filename exist but none with matching last_modified,
-        # delete entities with matching filename
-        logger.info(
-            f"Found existing entities for {filename} but with different last_modified time, deleting and reprocessing"
-        )
-        delete_by_source(filename, milvus_client)
+        total_chunks_processed += len(batch_chunks)
 
-    # Create chunks from the document
-    chunks = chunk_text(content, filename, last_modified)
-    logger.info(f"Created {len(chunks)} chunks from {filename}")
-
-    # Create embeddings and prepare data for Milvus
-    milvus_data = []
-    for chunk in tqdm(chunks, desc=f"Creating embeddings for {filename}"):
-        embedding = create_embedding(chunk["text"], embedding_client)
-        milvus_data.append({
-            "text": chunk["text"],
-            "source": chunk["metadata"]["source"],
-            "last_modified": chunk["metadata"]["last_modified"],
-            "vector": embedding
-        })
-
-    # Insert data into Milvus
-    if milvus_data:
-        logger.info(
-            f"Inserting {len(milvus_data)} documents from {filename} into Milvus collection {COLLECTION_NAME}"
-        )
-        milvus_client.insert(COLLECTION_NAME, milvus_data)
-        logger.info(f"Data insertion for {filename} complete")
-    else:
-        logger.warning(f"No data to insert for {filename}")
+    logger.info(f"Total chunks processed: {total_chunks_processed}")
 
 
 def main():
@@ -336,17 +413,9 @@ def main():
         logger.info("Setting up Milvus collection...")
         setup_milvus(milvus_client)
 
-        # Load documents
-        logger.info("Loading documents...")
-        documents = load_documents()
-        logger.info(f"Loaded {len(documents)} documents")
-
-        # Process each document individually
-        for filename, content in documents.items():
-            logger.info(
-                f"Processing document {filename} ({len(content)} bytes)")
-            process_document(filename, content, milvus_client,
-                             embedding_client)
+        # Process documents in batches
+        logger.info("Starting document processing in batches...")
+        process_chunks_in_batches(milvus_client, embedding_client)
 
         logger.info("=== update-data.py workflow completed successfully ===")
     except Exception as e:

@@ -19,7 +19,7 @@ Environment variables:
 import os
 import glob
 import sys
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Generator
 import logging
 from dotenv import load_dotenv
 import torch
@@ -28,6 +28,7 @@ import timm
 from tqdm import tqdm
 from openai import OpenAI
 from pymilvus import MilvusClient, DataType
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Set up logging
 # Check if LOG_FILE environment variable is set
@@ -79,73 +80,86 @@ logger.info(f"LOG_FILE: {log_file}")
 # Constants
 CHUNK_SIZE = 512  # Token size for each chunk
 CHUNK_OVERLAP = 64  # Token overlap between chunks
+CHUNK_BATCH_SIZE = 100  # Batch size for text processing
+FILE_BLOCK_SIZE = 1048576  # Block size for file reading
 IMAGE_SIZE = 384  # Input size for the image model
-BATCH_SIZE = 16  # Batch size for image processing
+IMAGE_BATCH_SIZE = 16  # Batch size for image processing
 
 
-def load_text_documents() -> Dict[str, str]:
-    """Load text document files from workspace/files directory.
+def setup_collection(client: MilvusClient,
+                     database_name: str,
+                     collection_name: str,
+                     is_image_collection: bool = False) -> str:
+    """Setup Milvus collection using blue-green deployment pattern.
     
+    Args:
+        client: Milvus client instance
+        database_name: Name of the database
+        collection_name: Base name of the collection
+        is_image_collection: Whether the collection is for image data
+        
     Returns:
-        Dict mapping filenames to file contents
+        The actual collection name created (suffixed with timestamp)
     """
-    file_contents = {}
+    # Select appropriate database
+    client.using_database(database_name)
+    logger.info(f"Using database: {database_name}")
+    logger.info(f"Creating collection: {collection_name}")
 
-    # Read the text file list if it exists
-    file_list_path = "/workspace/s3_text_file_list.txt"
-    if os.path.exists(file_list_path):
-        logger.info(f"Reading text file list from {file_list_path}")
+    # Determine embedding dimension based on collection type
+    embedding_dim = IMAGE_EMBEDDING_DIM if is_image_collection else TEXT_EMBEDDING_DIM
 
-    # Process all text files (full deployment)
-    logger.info("Processing all text files...")
-    file_pattern = ["/workspace/files/**/*.txt", "/workspace/files/**/*.md"]
-    files_to_process = []
-    for pattern in file_pattern:
-        files_to_process.extend(glob.glob(pattern, recursive=True))
+    # Create schema
+    schema = MilvusClient.create_schema()
+    schema.add_field(field_name="id",
+                     datatype=DataType.INT64,
+                     is_primary=True,
+                     auto_id=True)
+    if not is_image_collection:
+        schema.add_field(field_name="text",
+                         datatype=DataType.VARCHAR,
+                         max_length=65535)
+    schema.add_field(field_name="source",
+                     datatype=DataType.VARCHAR,
+                     max_length=255)
+    schema.add_field(field_name="vector",
+                     datatype=DataType.FLOAT_VECTOR,
+                     dim=embedding_dim)
 
-    logger.info(f"Found {len(files_to_process)} text files to process")
+    # Set up index parameters
+    index_params = MilvusClient.prepare_index_params()
+    index_params.add_index(
+        field_name="vector",
+        index_type="AUTOINDEX",
+        metric_type="IP"  # Inner product distance
+    )
 
-    # Load file contents
-    for file_path in files_to_process:
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                if content:
-                    relative_path = os.path.relpath(file_path,
-                                                    "/workspace/files/")
-                    file_contents[relative_path] = content
-                    logger.debug(
-                        f"Loaded text file: {relative_path} ({len(content)} bytes)"
-                    )
-        except Exception as e:
-            logger.error(f"Error loading file {file_path}: {e}")
+    # Create collection
+    client.create_collection(collection_name=collection_name,
+                             schema=schema,
+                             index_params=index_params)
+    logger.info(f"Collection {collection_name} created successfully")
 
-    return file_contents
+    return collection_name
 
 
-def load_image_documents() -> List[str]:
-    """Load image files from workspace/files directory.
+def create_database(client: MilvusClient, database_name: str) -> None:
+    """Create a Milvus database.
     
-    Returns:
-        List of image file paths
+    Args:
+        client: Milvus client instance
+        database_name: Name of the database to create
     """
-    # Process all image files
-    logger.info("Processing all image files...")
-    file_pattern = [
-        "/workspace/files/**/*.jpg", "/workspace/files/**/*.jpeg",
-        "/workspace/files/**/*.png"
-    ]
-    files_to_process = []
-    for pattern in file_pattern:
-        files_to_process.extend(glob.glob(pattern, recursive=True))
+    # Check if database exists
+    databases = client.list_databases()
+    if database_name in databases:
+        logger.info(f"Database {database_name} already exists")
+        return
 
-    logger.info(f"Found {len(files_to_process)} image files to process")
-    for image_path in files_to_process[:
-                                       5]:  # Log first 5 image files for verification
-        logger.debug(
-            f"Image file: {os.path.relpath(image_path, '/workspace/files/')}")
-
-    return files_to_process
+    # Create database
+    logger.info(f"Creating database {database_name}")
+    client.create_database(database_name)
+    logger.info(f"Database {database_name} created successfully")
 
 
 def load_image_model() -> torch.nn.Module:
@@ -224,8 +238,8 @@ def create_image_embeddings(image_paths: List[str],
     embeddings = []
 
     # Process images in batches
-    for i in range(0, len(image_paths), BATCH_SIZE):
-        batch_paths = image_paths[i:i + BATCH_SIZE]
+    for i in range(0, len(image_paths), IMAGE_BATCH_SIZE):
+        batch_paths = image_paths[i:i + IMAGE_BATCH_SIZE]
         batch_tensors = []
 
         for image_path in batch_paths:
@@ -246,55 +260,6 @@ def create_image_embeddings(image_paths: List[str],
     return embeddings
 
 
-def chunk_text(text: str, filename: str) -> List[Dict[str, Any]]:
-    """Split text into chunks with metadata.
-    
-    Args:
-        text: Text content to chunk
-        filename: Source filename for metadata
-        
-    Returns:
-        List of chunk objects with text and metadata
-    """
-    # Simple chunking by paragraphs first, then by size
-    paragraphs = text.split("\n\n")
-    chunks = []
-    current_chunk = ""
-
-    for paragraph in paragraphs:
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-
-        # If adding this paragraph would exceed chunk size, save current chunk and start a new one
-        if len(current_chunk) + len(paragraph) > CHUNK_SIZE:
-            if current_chunk:
-                chunks.append({
-                    "text": current_chunk,
-                    "metadata": {
-                        "source": filename
-                    }
-                })
-            current_chunk = paragraph
-        else:
-            # Add paragraph to current chunk with a separator if needed
-            if current_chunk:
-                current_chunk += "\n\n" + paragraph
-            else:
-                current_chunk = paragraph
-
-    # Add the final chunk if there's any content left
-    if current_chunk:
-        chunks.append({
-            "text": current_chunk,
-            "metadata": {
-                "source": filename
-            }
-        })
-
-    return chunks
-
-
 def create_embedding(text: str, client: OpenAI) -> List[float]:
     """Create embedding for text using OpenAI API.
     
@@ -309,95 +274,151 @@ def create_embedding(text: str, client: OpenAI) -> List[float]:
     return response.data[0].embedding
 
 
-def create_database(client: MilvusClient, database_name: str) -> None:
-    """Create a Milvus database.
+def create_text_embeddings(texts: List[Dict[str, Any]],
+                        client: OpenAI) -> List[Dict[str, Any]]:
+    """Create embeddings for a batch of texts.
     
     Args:
-        client: Milvus client instance
-        database_name: Name of the database to create
-    """
-    # Check if database exists
-    databases = client.list_databases()
-    if database_name in databases:
-        logger.info(f"Database {database_name} already exists")
-        return
-
-    # Create database
-    logger.info(f"Creating database {database_name}")
-    client.create_database(database_name)
-    logger.info(f"Database {database_name} created successfully")
-
-
-def setup_collection(client: MilvusClient,
-                     database_name: str,
-                     collection_name: str,
-                     is_image_collection: bool = False) -> str:
-    """Setup Milvus collection using blue-green deployment pattern.
-    
-    Args:
-        client: Milvus client instance
-        database_name: Name of the database
-        collection_name: Base name of the collection
-        is_image_collection: Whether the collection is for image data
+        texts: List of text chunks with metadata
+        client: OpenAI client instance
         
     Returns:
-        The actual collection name created (suffixed with timestamp)
+        List of data entries with embeddings ready for Milvus
     """
-    # Select appropriate database
-    client.using_database(database_name)
-    logger.info(f"Using database: {database_name}")
-
-    # Generate timestamped collection name
-    import time
-    timestamp = int(time.time())
-    actual_collection_name = f"{collection_name}_{timestamp}"
-    logger.info(f"Creating collection: {actual_collection_name}")
-
-    # Determine embedding dimension based on collection type
-    embedding_dim = IMAGE_EMBEDDING_DIM if is_image_collection else TEXT_EMBEDDING_DIM
-
-    # Create schema
-    schema = MilvusClient.create_schema()
-    schema.add_field(field_name="id",
-                     datatype=DataType.INT64,
-                     is_primary=True,
-                     auto_id=True)
-    if not is_image_collection:
-        schema.add_field(field_name="text",
-                         datatype=DataType.VARCHAR,
-                         max_length=65535)
-    schema.add_field(field_name="source",
-                     datatype=DataType.VARCHAR,
-                     max_length=255)
-    schema.add_field(field_name="vector",
-                     datatype=DataType.FLOAT_VECTOR,
-                     dim=embedding_dim)
-
-    # Set up index parameters
-    index_params = MilvusClient.prepare_index_params()
-    index_params.add_index(
-        field_name="vector",
-        index_type="AUTOINDEX",
-        metric_type="IP"  # Inner product distance
-    )
-
-    # Create collection
-    client.create_collection(collection_name=actual_collection_name,
-                             schema=schema,
-                             index_params=index_params)
-    logger.info(f"Collection {actual_collection_name} created successfully")
-
-    return actual_collection_name
+    milvus_data = []
+    for chunk in tqdm(texts, desc="Creating text embeddings"):
+        embedding = create_embedding(chunk["text"], client)
+        milvus_data.append({
+            "text": chunk["text"],
+            "source": chunk["metadata"]["source"],
+            "vector": embedding
+        })
+    return milvus_data
 
 
-def process_text_documents(documents: Dict[str,
-                                           str], milvus_client: MilvusClient,
-                           embedding_client: OpenAI, database_name: str,
-                           collection_name: str) -> None:
-    """Process text documents, create chunks, and store in Milvus.
+def load_text_documents() -> List[str]:
+    """Find all text document files from workspace/files directory.
+    
+    Returns:
+        List of file paths to process
+    """
+    # Process all text files
+    logger.info("Finding all text files to process...")
+    file_pattern = ["/workspace/files/**/*.txt", "/workspace/files/**/*.md"]
+    files_to_process = []
+    for pattern in file_pattern:
+        files_to_process.extend(glob.glob(pattern, recursive=True))
+
+    logger.info(f"Found {len(files_to_process)} text files to process")
+    return files_to_process
+
+
+def load_image_documents() -> List[str]:
+    """Load image files from workspace/files directory.
+    
+    Returns:
+        List of image file paths
+    """
+    # Process all image files
+    logger.info("Processing all image files...")
+    file_pattern = [
+        "/workspace/files/**/*.jpg", "/workspace/files/**/*.jpeg",
+        "/workspace/files/**/*.png"
+    ]
+    files_to_process = []
+    for pattern in file_pattern:
+        files_to_process.extend(glob.glob(pattern, recursive=True))
+
+    logger.info(f"Found {len(files_to_process)} image files to process")
+    for image_path in files_to_process[:
+                                       5]:  # Log first 5 image files for verification
+        logger.debug(
+            f"Image file: {os.path.relpath(image_path, '/workspace/files/')}")
+
+    return files_to_process
+
+
+def stream_read_file(file_path: str,
+                     block_size: int = FILE_BLOCK_SIZE) -> Generator[str, None, None]:
+    """Stream read a file in chunks to avoid loading large files entirely into memory.
     
     Args:
-        documents: Dictionary of documents {filename: content}
+        file_path: Path to the file to read
+        block_size: Size of each block to read
+        
+    Yields:
+        Chunks of the file content
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            while True:
+                block = f.read(block_size)
+                if not block:
+                    break
+                yield block
+    except Exception as e:
+        logger.error(f"Error reading file {file_path}: {e}")
+
+
+def stream_process_file(
+        file_path: str) -> Generator[Dict[str, Any], None, None]:
+    """Stream process a single file and yield text chunks.
+    
+    Args:
+        file_path: Path to the file to process
+        
+    Yields:
+        Chunk objects with text and metadata
+    """
+    relative_path = os.path.relpath(file_path, "/workspace/files/")
+    logger.info(f"Processing file: {relative_path}")
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        length_function=len,
+        is_separator_regex=False,
+    )
+
+    buffer = ""
+    chunk_count = 0
+
+    # Read the file in blocks and process incrementally
+    for block in stream_read_file(file_path):
+        buffer += block
+
+        if len(buffer) >= CHUNK_SIZE + CHUNK_OVERLAP:
+            # Create documents from the buffer
+            chunks = text_splitter.split_text(buffer)
+
+            # Yield all documents except the last one
+            for chunk in chunks[:-1]:
+                chunk_count += 1
+                yield {"text": chunk, "metadata": {"source": relative_path}}
+
+            # Keep the last document as the buffer for next iteration
+            if chunks:
+                buffer = chunks[-1]
+            else:
+                buffer = ""
+
+    # Process any remaining content in the buffer
+    if buffer.strip():
+        chunks = text_splitter.split_text(buffer)
+        for chunk in chunks:
+            chunk_count += 1
+            yield {"text": chunk, "metadata": {"source": relative_path}}
+
+    logger.info(f"Created {chunk_count} chunks from {relative_path}")
+
+
+def process_text_documents(text_files: List[str], milvus_client: MilvusClient,
+                           embedding_client: OpenAI, database_name: str,
+                           collection_name: str) -> None:
+    """Process text documents, create chunks, and store in Milvus using batch processing.
+    
+    Args:
+        text_files: List of text file paths
         milvus_client: Milvus client instance
         embedding_client: OpenAI client for embeddings
         database_name: Database to use
@@ -406,38 +427,55 @@ def process_text_documents(documents: Dict[str,
     # Use specified database
     milvus_client.using_database(database_name)
 
-    all_chunks = []
-    logger.info(f"Processing {len(documents)} text documents")
+    if not text_files:
+        logger.warning("No text files to process")
+        return
 
-    # Chunk all documents
-    for filename, content in documents.items():
-        logger.info(
-            f"Processing text document: {filename} ({len(content)} bytes)")
-        chunks = chunk_text(content, filename)
-        all_chunks.extend(chunks)
+    logger.info(f"Processing {len(text_files)} text documents in batches")
+    
+    batch_chunks = []
+    total_chunks_processed = 0
+    
+    # Process each file
+    for file_path in text_files:
+        # Stream process each file
+        for chunk in stream_process_file(file_path):
+            batch_chunks.append(chunk)
 
-    logger.info(f"Created {len(all_chunks)} text chunks")
+            # When we have enough chunks, process and insert them
+            if len(batch_chunks) >= CHUNK_BATCH_SIZE:
+                logger.info(f"Processing batch of {len(batch_chunks)} chunks")
 
-    # Create embeddings and prepare data for Milvus
-    milvus_data = []
-    for i, chunk in enumerate(tqdm(all_chunks,
-                                   desc="Creating text embeddings")):
-        embedding = create_embedding(chunk["text"], embedding_client)
-        milvus_data.append({
-            "text": chunk["text"],
-            "source": chunk["metadata"]["source"],
-            "vector": embedding
-        })
+                # Create embeddings for this batch
+                milvus_data = create_text_embeddings(batch_chunks, embedding_client)
 
-    # Insert data into Milvus
-    if milvus_data:
-        logger.info(
-            f"Inserting {len(milvus_data)} text chunks into Milvus collection {collection_name}"
-        )
-        milvus_client.insert(collection_name, milvus_data)
-        logger.info("Text data insertion complete")
-    else:
-        logger.warning("No text data to insert")
+                # Insert into Milvus
+                if milvus_data:
+                    logger.info(
+                        f"Inserting {len(milvus_data)} chunks into Milvus collection {collection_name}"
+                    )
+                    milvus_client.insert(collection_name, milvus_data)
+
+                # Update counts and clear batch
+                total_chunks_processed += len(batch_chunks)
+                logger.info(
+                    f"Total chunks processed so far: {total_chunks_processed}")
+                batch_chunks = []
+
+    # Process any remaining chunks in the final batch
+    if batch_chunks:
+        logger.info(f"Processing final batch of {len(batch_chunks)} chunks")
+        milvus_data = create_text_embeddings(batch_chunks, embedding_client)
+
+        if milvus_data:
+            logger.info(
+                f"Inserting {len(milvus_data)} chunks into Milvus collection {collection_name}"
+            )
+            milvus_client.insert(collection_name, milvus_data)
+
+        total_chunks_processed += len(batch_chunks)
+
+    logger.info(f"Total chunks processed: {total_chunks_processed}")
 
 
 def process_image_documents(image_files: List[str],
@@ -600,8 +638,6 @@ def main():
     """Main function to run the blue-green deployment workflow."""
     logger.info("=== Starting publish-release workflow ===")
 
-    actual_text_collection = None
-    actual_image_collection = None
     text_count = 0
     image_count = 0
 
@@ -621,19 +657,19 @@ def main():
         if COLLECTION_NAME_TEXT:
             logger.info("Starting text document processing...")
             # Setup text collection
-            actual_text_collection = setup_collection(milvus_client,
+            text_collection = setup_collection(milvus_client,
                                                       DATABASE_NAME,
                                                       COLLECTION_NAME_TEXT)
 
-            # Load and process text documents
-            text_documents = load_text_documents()
-            text_count = len(text_documents)
-            if text_documents:
-                process_text_documents(text_documents, milvus_client,
+            # Find and process text files
+            text_files = load_text_documents()
+            text_count = len(text_files)
+            if text_files:
+                process_text_documents(text_files, milvus_client,
                                        text_embedding_client, DATABASE_NAME,
-                                       actual_text_collection)
+                                       text_collection)
                 logger.info(
-                    f"Text collection published as: {actual_text_collection}")
+                    f"Text collection published as: {text_collection}")
             else:
                 logger.warning("No text documents found to process")
         else:
@@ -644,7 +680,7 @@ def main():
         if COLLECTION_NAME_IMAGE:
             logger.info("Starting image document processing...")
             # Setup image collection
-            actual_image_collection = setup_collection(
+            image_collection = setup_collection(
                 milvus_client,
                 DATABASE_NAME,
                 COLLECTION_NAME_IMAGE,
@@ -656,9 +692,9 @@ def main():
             if image_files:
                 process_image_documents(image_files, milvus_client,
                                         text_embedding_client, DATABASE_NAME,
-                                        actual_image_collection)
+                                        image_collection)
                 logger.info(
-                    f"Image collection published as: {actual_image_collection}"
+                    f"Image collection published as: {image_collection}"
                 )
             else:
                 logger.warning("No image files found to process")
@@ -668,8 +704,8 @@ def main():
 
         # Generate release summary
         generate_release_summary(database_name=DATABASE_NAME,
-                                 text_collection=actual_text_collection,
-                                 image_collection=actual_image_collection,
+                                 text_collection=text_collection,
+                                 image_collection=image_collection,
                                  text_count=text_count,
                                  image_count=image_count)
 
