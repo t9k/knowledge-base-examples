@@ -18,7 +18,7 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter
 
 # 配置
 MILVUS_URI = "http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
-COLLECTION_NAME = "criminal_law"
+COLLECTION_NAME = "criminal_law"  # "civil_code"
 BATCH_SIZE = 50
 
 
@@ -42,20 +42,21 @@ def chinese_to_arabic(chinese_str):
         '八': 8,
         '九': 9,
         '十': 10,
-        '百': 100
+        '百': 100,
+        '千': 1000
     }
 
     # 如果是"第xx条"格式
     if '第' in chinese_str and '条' in chinese_str:
         # 提取中文数字部分
-        match = re.search(r'第([零一二三四五六七八九十百]+)条', chinese_str)
+        match = re.search(r'第([零一二三四五六七八九十百千]+)条', chinese_str)
         if not match:
             return None
 
         chinese_num = match.group(1)
     # 如果是"xx、"格式
     elif '、' in chinese_str:
-        match = re.search(r'([一二三四五六七八九十]+)、', chinese_str)
+        match = re.search(r'([一二三四五六七八九十百千]+)、', chinese_str)
         if not match:
             return None
 
@@ -73,7 +74,7 @@ def chinese_to_arabic(chinese_str):
         chinese_num = chinese_num[1:]
 
     for char in chinese_num:
-        if char in ['十', '百']:
+        if char in ['十', '百', '千']:
             # 处理单位
             if temp == 0:
                 temp = 1
@@ -92,10 +93,10 @@ def chinese_to_arabic(chinese_str):
 
 def chunk_text(text):
     headers_to_split_on = [
-        ("#", "Law"),
-        ("##", "Part"),
-        ("###", "Chapter"),
-        ("####", "Section"),
+        ("#", "law"),
+        ("##", "part"),
+        ("###", "chapter"),
+        ("####", "section"),
     ]
 
     md_splitter = MarkdownHeaderTextSplitter(
@@ -107,7 +108,7 @@ def chunk_text(text):
     chunks = []
 
     # 正则表达式分隔符
-    pattern = r'(第[零一二三四五六七八九十百]+条 |[一二三四五六七八九十]+、)'
+    pattern = r'(第[零一二三四五六七八九十百千]+条 |[一二三四五六七八九十百千]+、|<!-- INFO END -->)'
 
     for md_header_split in md_header_splits:
         text_content = md_header_split.page_content
@@ -137,10 +138,14 @@ def chunk_text(text):
 
             # 提取文本块（包含分隔符）
             chunk_text = text_content[start_pos:end_pos]
+            
+            # 如果是 <!-- INFO END --> 分隔符，不包含在文本中
+            if chunk_text.startswith("<!-- INFO END -->"):
+                chunk_text = chunk_text[len("<!-- INFO END -->"):].strip()
 
             # 提取文章编号
             article = None
-            article_match = re.search(r'第([零一二三四五六七八九十百]+)条 ', chunk_text)
+            article_match = re.search(r'第([零一二三四五六七八九十百千]+)条 ', chunk_text)
             if article_match:
                 article = chinese_to_arabic(article_match.group(0))
 
@@ -208,10 +213,10 @@ def record_generator(md_path):
 
         # 获取元数据
         metadata = {
-            "law": metadata["Law"],
-            "part": metadata.get("Part", ""),
-            "chapter": metadata.get("Chapter", ""),
-            "section": metadata.get("Section", ""),
+            "law": metadata["law"],
+            "part": metadata.get("part", ""),
+            "chapter": metadata.get("chapter", ""),
+            "section": metadata.get("section", ""),
             "article": metadata.get("article", 0)
         }
 
