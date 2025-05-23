@@ -16,10 +16,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # 配置
 MILVUS_URI = "http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
-COLLECTION_NAME = "law_hybrid_demo"
+COLLECTION_NAME = "criminal_cases"
 CHUNK_SIZE = 256
 CHUNK_OVERLAP = 32
-BATCH_SIZE = 50
+BATCH_SIZE = 100
 
 
 # 读取 jsonl 文件，每行一个 dict
@@ -45,19 +45,23 @@ def setup_milvus_collection(dense_dim):
         FieldSchema(name="chunk_id",
                     dtype=DataType.VARCHAR,
                     is_primary=True,
-                    max_length=100),
-        FieldSchema(name="chunk", dtype=DataType.VARCHAR, max_length=8192),
+                    max_length=36),
+        FieldSchema(name="chunk", dtype=DataType.VARCHAR, max_length=3000),
         FieldSchema(name="relevant_articles",
                     dtype=DataType.ARRAY,
                     element_type=DataType.INT64,
-                    max_capacity=10),
+                    max_capacity=9),
         FieldSchema(name="accusation",
                     dtype=DataType.ARRAY,
                     element_type=DataType.VARCHAR,
                     max_length=100,
-                    max_capacity=10),
+                    max_capacity=13),
         FieldSchema(name="punish_of_money", dtype=DataType.INT64),
-        FieldSchema(name="criminal", dtype=DataType.VARCHAR, max_length=100),
+        FieldSchema(name="criminals",
+                    dtype=DataType.ARRAY,
+                    element_type=DataType.VARCHAR,
+                    max_length=10,
+                    max_capacity=30),
         FieldSchema(name="imprisonment", dtype=DataType.INT64),
         FieldSchema(name="life_imprisonment", dtype=DataType.BOOL),
         FieldSchema(name="death_penalty", dtype=DataType.BOOL),
@@ -95,17 +99,15 @@ def record_generator(jsonl_path):
             if len(chunk) <= 3:
                 continue
 
-            
-
             metadata = {
                 "relevant_articles":
-                [int(i) for i in meta["relevant_articles"]],
+                [int(i) for i in set(meta["relevant_articles"])],
                 "accusation":
                 meta["accusation"],
                 "punish_of_money":
                 meta["punish_of_money"],
-                "criminal":
-                meta["criminals"][0],
+                "criminals":
+                meta["criminals"],
                 "imprisonment":
                 meta["term_of_imprisonment"]["imprisonment"],
                 "life_imprisonment":
@@ -131,7 +133,7 @@ def insert_data_streaming(col, record_iter, ef, batch_size=BATCH_SIZE):
                 [r["relevant_articles"] for r in buffer],
                 [r["accusation"] for r in buffer],
                 [r["punish_of_money"] for r in buffer],
-                [r["criminal"] for r in buffer],
+                [r["criminals"] for r in buffer],
                 [r["imprisonment"] for r in buffer],
                 [r["life_imprisonment"] for r in buffer],
                 [r["death_penalty"] for r in buffer],
@@ -151,7 +153,7 @@ def insert_data_streaming(col, record_iter, ef, batch_size=BATCH_SIZE):
             [r["relevant_articles"] for r in buffer],
             [r["accusation"] for r in buffer],
             [r["punish_of_money"] for r in buffer],
-            [r["criminal"] for r in buffer],
+            [r["criminals"] for r in buffer],
             [r["imprisonment"] for r in buffer],
             [r["life_imprisonment"] for r in buffer],
             [r["death_penalty"] for r in buffer],
@@ -169,6 +171,10 @@ def main():
     parser.add_argument(
         'jsonl_path',
         help='Path to JSONL file or directory containing JSON files')
+    parser.add_argument(
+        '--use-gcu',
+        help='Use Enflame GCU for embedding',
+        action='store_true')
     args = parser.parse_args()
 
     path = args.jsonl_path
@@ -194,7 +200,14 @@ def main():
         print(f"Path not found: {path}")
         return
 
-    ef = BGEM3EmbeddingFunction(use_fp16=False, device="cpu")
+    if args.use_gcu:
+        import torch
+        import torch_gcu
+        ef = BGEM3EmbeddingFunction(use_fp16=False, device="gcu")
+        print("Using Enflame GCU for embedding")
+    else:
+        ef = BGEM3EmbeddingFunction(use_fp16=False, device="cpu")
+        print("Using CPU for embedding")
     dense_dim = ef.dim["dense"]
     col = setup_milvus_collection(dense_dim)
 
