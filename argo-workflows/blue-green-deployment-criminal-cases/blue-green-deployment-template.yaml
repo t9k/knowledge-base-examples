@@ -1,0 +1,167 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: blue-green-deployment-criminal-cases
+spec:
+  entrypoint: download-and-process
+  arguments:
+    parameters:
+      - name: database-name
+        description: "Database name for blue-green deployment"
+  volumes:
+    - name: workspace
+      persistentVolumeClaim:
+        claimName: blue-green-deployment-criminal-cases-pvc
+    - name: env-config
+      configMap:
+        name: blue-green-deployment-criminal-cases-config
+  templates:
+    - name: download-and-process
+      steps:
+        - - name: prepare
+            template: prepare
+        - - name: download-files
+            template: download-files
+            arguments:
+              parameters:
+                - name: log-timestamp
+                  value: "{{steps.prepare.outputs.parameters.log-timestamp}}"
+        - - name: publish-release
+            template: publish-release
+            arguments:
+              parameters:
+                - name: database-name
+                  value: "{{workflow.parameters.database-name}}"
+                - name: log-timestamp
+                  value: "{{steps.prepare.outputs.parameters.log-timestamp}}"
+
+    - name: prepare
+      outputs:
+        parameters:
+          - name: log-timestamp
+            valueFrom:
+              path: /tmp/log-timestamp.txt
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            
+            # Create logs directory
+            mkdir -p /workspace/logs
+
+            # Generate timestamp for log filename
+            TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+            echo -n "${TIMESTAMP}" > /tmp/log-timestamp.txt
+            LOG_DIR="/workspace/logs/blue-green-deployment-criminal-cases_${TIMESTAMP}"
+            mkdir -p "$LOG_DIR"
+            LOG_FILE="$LOG_DIR/log.txt"
+            
+            # Start logging
+            exec > >(tee -a "${LOG_FILE}") 2>&1
+            echo "=== Starting blue-green-deployment-criminal-cases workflow at $(date) ==="
+            echo "=== Preparing workspace ==="
+            
+            # Validate database name
+            DATABASE_NAME="{{workflow.parameters.database-name}}"
+            if ! [[ $DATABASE_NAME =~ ^[a-zA-Z0-9_]+$ ]]; then
+              echo "Error: Database name '$DATABASE_NAME' is invalid. Database names can only contain numbers, letters, and underscores."
+              exit 1
+            fi
+            
+            echo "Database name: $DATABASE_NAME"
+            
+            # Check env config for valid collection names
+            if [ -f /env-config/env.properties ]; then
+              source /env-config/env.properties
+              if [ -n "$COLLECTION_NAME_TEXT" ] && ! [[ $COLLECTION_NAME_TEXT =~ ^[a-zA-Z0-9_]+$ ]]; then
+                echo "Error: COLLECTION_NAME_TEXT='$COLLECTION_NAME_TEXT' is invalid. Collection names can only contain numbers, letters, and underscores."
+                exit 1
+              fi
+              if [ -n "$COLLECTION_NAME_IMAGE" ] && ! [[ $COLLECTION_NAME_IMAGE =~ ^[a-zA-Z0-9_]+$ ]]; then
+                echo "Error: COLLECTION_NAME_IMAGE='$COLLECTION_NAME_IMAGE' is invalid. Collection names can only contain numbers, letters, and underscores."
+                exit 1
+              fi
+              
+              echo "Text collection name: $COLLECTION_NAME_TEXT"
+              echo "Image collection name: $COLLECTION_NAME_IMAGE"
+            fi
+            
+            git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
+            mkdir -p /workspace/scripts
+            cp /tmp/repo/argo-workflows/blue-green-deployment-criminal-cases/*.sh /workspace/scripts/
+            cp /tmp/repo/argo-workflows/blue-green-deployment-criminal-cases/*.py /workspace/scripts/
+            
+            echo "=== Prepare step completed at $(date) ==="
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+
+    - name: download-files
+      inputs:
+        parameters:
+          - name: log-timestamp
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            LOG_DIR="/workspace/logs/blue-green-deployment-criminal-cases_{{inputs.parameters.log-timestamp}}"
+            LOG_FILE="$LOG_DIR/log.txt"
+            mkdir -p "$LOG_DIR"
+            exec > >(tee -a "${LOG_FILE}") 2>&1
+            echo "=== Starting download-files step at $(date) ==="
+            
+            cd /workspace
+            chmod +x /workspace/scripts/download-files.sh
+            /workspace/scripts/download-files.sh
+            
+            echo "=== Sync-files step completed at $(date) ==="
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+ 
+    - name: publish-release
+      inputs:
+        parameters:
+          - name: database-name
+          - name: log-timestamp
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/pytorch:2.3.0-milvus-bgem3-enflame
+        command: [/bin/bash, -c]
+        args:
+          - |
+            set -e
+            LOG_DIR="/workspace/logs/blue-green-deployment-criminal-cases_{{inputs.parameters.log-timestamp}}"
+            LOG_FILE="$LOG_DIR/log.txt"
+            mkdir -p "$LOG_DIR"
+            exec > >(tee -a "${LOG_FILE}") 2>&1
+            echo "=== Starting publish-release step at $(date) ==="
+            
+            # Run the insertion script
+            export DATABASE_NAME="{{inputs.parameters.database-name}}"
+            export LOG_FILE="${LOG_FILE}"
+            HF_ENDPOINT=https://hf-mirror.com /workspace/scripts/publish-release.py
+            
+            echo "=== Publish-release step completed at $(date) ==="
+            echo "=== Workflow completed successfully at $(date) ==="
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+        resources:
+          requests:
+            enflame.com/gcu: 1
+            memory: 8Gi
+            cpu: 4
+          limits:
+            enflame.com/gcu: 1
+            memory: 16Gi
+            cpu: 8
