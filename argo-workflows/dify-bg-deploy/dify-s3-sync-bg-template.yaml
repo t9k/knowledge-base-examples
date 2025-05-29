@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: dify-s3-sync-blue-green
+  name: dify-s3-sync-bg
 spec:
   entrypoint: sync-docs
   arguments:
@@ -85,7 +85,7 @@ spec:
             # Pull scripts from Git repo
             git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
             mkdir -p /workspace/scripts
-            cp /tmp/repo/argo-workflows/dify-blue-green-deployment/*.sh /workspace/scripts/
+            cp /tmp/repo/argo-workflows/dify-bg-deploy/*.sh /workspace/scripts/
 
             chmod +x /workspace/scripts/determine-active-env.sh
             /workspace/scripts/determine-active-env.sh

@@ -5,7 +5,7 @@
 set -e
 
 # Log script start with timestamp
-echo "$(date +'%Y-%m-%d %H:%M:%S') - Starting download-files.sh script"
+echo "$(date +'%Y-%m-%d %H:%M:%S') - Starting download.sh script"
 
 # Download CAIL2018_ALL_DATA.zip and unzip it
 if [ ! -d "criminal-cases" ]; then
@@ -17,4 +17,4 @@ else
     echo "criminal-cases directory already exists"
 fi
 
-echo "$(date +'%Y-%m-%d %H:%M:%S') - download-files.sh completed successfully"
+echo "$(date +'%Y-%m-%d %H:%M:%S') - download.sh completed successfully"

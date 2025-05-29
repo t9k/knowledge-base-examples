@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: blue-green-deployment-criminal-cases-pvc
+  name: bg-deploy-criminal-cases-pvc
 spec:
   accessModes:
     - ReadWriteMany

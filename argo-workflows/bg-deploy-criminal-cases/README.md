@@ -13,11 +13,11 @@
 
 ## 文件说明
 
-- `blue-green-deployment-template.yaml`：Argo WorkflowTemplate 定义
+- `bg-deploy-template.yaml`：Argo WorkflowTemplate 定义
 - `configmap.yaml`：配置工作流的 ConfigMap
 - `pvc.yaml`：工作空间存储的 PersistentVolumeClaim
-- `download-files.sh`：从互联网下载刑法案例数据文件并解压的脚本
-- `publish-release.py`：创建 Milvus Database 及其下的 Collection，处理案例数据文件并插入数据到 Collection 的 Python 脚本
+- `download.sh`：从互联网下载刑法案例数据文件并解压的脚本
+- `db-insert.py`：创建 Milvus Database 及其下的 Collection，处理案例数据文件并插入数据到 Collection 的 Python 脚本
 
 ## 配置说明
 
@@ -25,7 +25,7 @@
 
 - `database-name`：Milvus Database 名称
 
-ConfigMap blue-green-deployment-criminal-cases-config 包含以下环境变量：
+ConfigMap bg-deploy-criminal-cases-config 包含以下环境变量：
 
 - `COLLECTION_NAME`：集合名称（固定名称，创建在指定 Database 中）
 - `MILVUS_URI`：Milvus 连接 URI
@@ -61,7 +61,7 @@ ConfigMap blue-green-deployment-criminal-cases-config 包含以下环境变量�
 
 3. 注册工作流模板：
    ```bash
-   kubectl apply -f blue-green-deployment-template.yaml
+   kubectl apply -f bg-deploy-template.yaml
    ```
 
 ## 手动执行
@@ -69,12 +69,12 @@ ConfigMap blue-green-deployment-criminal-cases-config 包含以下环境变量�
 手动运行工作流：
 
 ```bash
-argo submit --from workflowtemplate/blue-green-deployment-criminal-cases \
+argo submit --from workflowtemplate/bg-deploy-criminal-cases \
   -p database-name=<your-database-name>
 ```
 
 ## TODO
 
-* 步骤 publish-release
+* 步骤 db-insert
   * 可以并行处理
 * ConfigMap 中有一个 MILVUS_TOKEN 属于敏感信息

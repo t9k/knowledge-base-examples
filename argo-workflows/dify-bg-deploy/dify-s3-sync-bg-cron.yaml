@@ -1,13 +1,13 @@
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
-  name: dify-s3-sync-blue-green
+  name: dify-s3-sync-bg
 spec:
   schedule: "0 15 * * *"  # Every day at 3pm
   concurrencyPolicy: Replace
   workflowSpec:
     workflowTemplateRef:
-      name: dify-s3-sync-blue-green
+      name: dify-s3-sync-bg
     arguments:
       parameters:
         - name: host

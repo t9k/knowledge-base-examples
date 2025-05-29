@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: blue-green-deployment-pvc
+  name: bg-deploy-pvc
 spec:
   accessModes:
     - ReadWriteMany

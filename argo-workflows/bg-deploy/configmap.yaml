@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: blue-green-deployment-config
+  name: bg-deploy-config
 data:
   env.properties: |
     S3_PATH_TEXT="s3://my-bucket/path/to/text"

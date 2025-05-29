@@ -14,7 +14,7 @@
 
 ## 文件说明
 
-- `blue-green-deployment-template.yaml`：Argo WorkflowTemplate 定义
+- `bg-deploy-template.yaml`：Argo WorkflowTemplate 定义
 - `configmap.yaml`：配置工作流的 ConfigMap
 - `secret.yaml`：配置 S3 访问的 Secret
 - `pvc.yaml`：工作空间存储的 PersistentVolumeClaim
@@ -27,7 +27,7 @@
 
 - `database-name`：Milvus Database 名称
 
-ConfigMap blue-green-deployment-config 包含以下环境变量：
+ConfigMap bg-deploy-config 包含以下环境变量：
 
 - `S3_PATH_TEXT`：文本文件的 S3 路径
 - `S3_PATH_IMAGE`：图像文件的 S3 路径
@@ -86,7 +86,7 @@ ConfigMap rclone-config 包含 rclone 配置文件，用于访问 S3 存储桶�
 
 3. 注册工作流模板：
    ```bash
-   kubectl apply -f blue-green-deployment-template.yaml
+   kubectl apply -f bg-deploy-template.yaml
    ```
 
 ## 手动执行
@@ -94,7 +94,7 @@ ConfigMap rclone-config 包含 rclone 配置文件，用于访问 S3 存储桶�
 手动运行工作流：
 
 ```bash
-argo submit --from workflowtemplate/blue-green-deployment \
+argo submit --from workflowtemplate/bg-deploy \
   -p database-name=<your-database-name>
 ```
 

@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: blue-green-deployment
+  name: bg-deploy
 spec:
   entrypoint: sync-and-process
   arguments:
@@ -14,10 +14,10 @@ spec:
         secretName: rclone-s3-config
     - name: workspace
       persistentVolumeClaim:
-        claimName: blue-green-deployment-pvc
+        claimName: bg-deploy-pvc
     - name: env-config
       configMap:
-        name: blue-green-deployment-config
+        name: bg-deploy-config
   templates:
     - name: sync-and-process
       steps:
@@ -57,13 +57,13 @@ spec:
             # Generate timestamp for log filename
             TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
             echo -n "${TIMESTAMP}" > /tmp/log-timestamp.txt
-            LOG_DIR="/workspace/logs/blue-green-deployment_${TIMESTAMP}"
+            LOG_DIR="/workspace/logs/bg-deploy_${TIMESTAMP}"
             mkdir -p "$LOG_DIR"
             LOG_FILE="$LOG_DIR/log.txt"
             
             # Start logging
             exec > >(tee -a "${LOG_FILE}") 2>&1
-            echo "=== Starting blue-green-deployment workflow at $(date) ==="
+            echo "=== Starting bg-deploy workflow at $(date) ==="
             echo "=== Preparing workspace ==="
             
             # Validate database name
@@ -93,8 +93,8 @@ spec:
             
             git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
             mkdir -p /workspace/scripts
-            cp /tmp/repo/argo-workflows/blue-green-deployment/*.sh /workspace/scripts/
-            cp /tmp/repo/argo-workflows/blue-green-deployment/*.py /workspace/scripts/
+            cp /tmp/repo/argo-workflows/bg-deploy/*.sh /workspace/scripts/
+            cp /tmp/repo/argo-workflows/bg-deploy/*.py /workspace/scripts/
             
             echo "=== Prepare step completed at $(date) ==="
         volumeMounts:
@@ -113,7 +113,7 @@ spec:
         args:
           - |
             set -e
-            LOG_DIR="/workspace/logs/blue-green-deployment_{{inputs.parameters.log-timestamp}}"
+            LOG_DIR="/workspace/logs/bg-deploy_{{inputs.parameters.log-timestamp}}"
             LOG_FILE="$LOG_DIR/log.txt"
             mkdir -p "$LOG_DIR"
             exec > >(tee -a "${LOG_FILE}") 2>&1
@@ -142,7 +142,7 @@ spec:
         args:
           - |
             set -e
-            LOG_DIR="/workspace/logs/blue-green-deployment_{{inputs.parameters.log-timestamp}}"
+            LOG_DIR="/workspace/logs/bg-deploy_{{inputs.parameters.log-timestamp}}"
             LOG_FILE="$LOG_DIR/log.txt"
             mkdir -p "$LOG_DIR"
             exec > >(tee -a "${LOG_FILE}") 2>&1

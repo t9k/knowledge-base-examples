@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: blue-green-deployment-criminal-cases-config
+  name: bg-deploy-criminal-cases-config
 data:
   env.properties: |
     COLLECTION_NAME="criminal_cases"

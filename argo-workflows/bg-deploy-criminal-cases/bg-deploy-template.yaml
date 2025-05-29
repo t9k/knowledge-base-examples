@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: blue-green-deployment-criminal-cases
+  name: bg-deploy-criminal-cases
 spec:
   entrypoint: download-and-process
   arguments:
@@ -11,23 +11,23 @@ spec:
   volumes:
     - name: workspace
       persistentVolumeClaim:
-        claimName: blue-green-deployment-criminal-cases-pvc
+        claimName: bg-deploy-criminal-cases-pvc
     - name: env-config
       configMap:
-        name: blue-green-deployment-criminal-cases-config
+        name: bg-deploy-criminal-cases-config
   templates:
     - name: download-and-process
       steps:
         - - name: prepare
             template: prepare
-        - - name: download-files
-            template: download-files
+        - - name: download
+            template: download
             arguments:
               parameters:
                 - name: log-timestamp
                   value: "{{steps.prepare.outputs.parameters.log-timestamp}}"
-        - - name: publish-release
-            template: publish-release
+        - - name: db-insert
+            template: db-insert
             arguments:
               parameters:
                 - name: database-name
@@ -54,13 +54,13 @@ spec:
             # Generate timestamp for log filename
             TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
             echo -n "${TIMESTAMP}" > /tmp/log-timestamp.txt
-            LOG_DIR="/workspace/logs/blue-green-deployment-criminal-cases_${TIMESTAMP}"
+            LOG_DIR="/workspace/logs/bg-deploy-criminal-cases_${TIMESTAMP}"
             mkdir -p "$LOG_DIR"
             LOG_FILE="$LOG_DIR/log.txt"
             
             # Start logging
             exec > >(tee -a "${LOG_FILE}") 2>&1
-            echo "=== Starting blue-green-deployment-criminal-cases workflow at $(date) ==="
+            echo "=== Starting bg-deploy-criminal-cases workflow at $(date) ==="
             echo "=== Preparing workspace ==="
             
             # Validate database name
@@ -90,8 +90,8 @@ spec:
             
             git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
             mkdir -p /workspace/scripts
-            cp /tmp/repo/argo-workflows/blue-green-deployment-criminal-cases/*.sh /workspace/scripts/
-            cp /tmp/repo/argo-workflows/blue-green-deployment-criminal-cases/*.py /workspace/scripts/
+            cp /tmp/repo/argo-workflows/bg-deploy-criminal-cases/*.sh /workspace/scripts/
+            cp /tmp/repo/argo-workflows/bg-deploy-criminal-cases/*.py /workspace/scripts/
             
             echo "=== Prepare step completed at $(date) ==="
         volumeMounts:
@@ -100,7 +100,7 @@ spec:
           - name: env-config
             mountPath: /env-config
 
-    - name: download-files
+    - name: download
       inputs:
         parameters:
           - name: log-timestamp
@@ -110,15 +110,15 @@ spec:
         args:
           - |
             set -e
-            LOG_DIR="/workspace/logs/blue-green-deployment-criminal-cases_{{inputs.parameters.log-timestamp}}"
+            LOG_DIR="/workspace/logs/bg-deploy-criminal-cases_{{inputs.parameters.log-timestamp}}"
             LOG_FILE="$LOG_DIR/log.txt"
             mkdir -p "$LOG_DIR"
             exec > >(tee -a "${LOG_FILE}") 2>&1
-            echo "=== Starting download-files step at $(date) ==="
+            echo "=== Starting download step at $(date) ==="
             
             cd /workspace
-            chmod +x /workspace/scripts/download-files.sh
-            /workspace/scripts/download-files.sh
+            chmod +x /workspace/scripts/download.sh
+            /workspace/scripts/download.sh
             
             echo "=== Sync-files step completed at $(date) ==="
         volumeMounts:
@@ -127,7 +127,7 @@ spec:
           - name: env-config
             mountPath: /env-config
  
-    - name: publish-release
+    - name: db-insert
       inputs:
         parameters:
           - name: database-name
@@ -138,18 +138,18 @@ spec:
         args:
           - |
             set -e
-            LOG_DIR="/workspace/logs/blue-green-deployment-criminal-cases_{{inputs.parameters.log-timestamp}}"
+            LOG_DIR="/workspace/logs/bg-deploy-criminal-cases_{{inputs.parameters.log-timestamp}}"
             LOG_FILE="$LOG_DIR/log.txt"
             mkdir -p "$LOG_DIR"
             exec > >(tee -a "${LOG_FILE}") 2>&1
-            echo "=== Starting publish-release step at $(date) ==="
+            echo "=== Starting db-insert step at $(date) ==="
             
             # Run the insertion script
             export DATABASE_NAME="{{inputs.parameters.database-name}}"
             export LOG_FILE="${LOG_FILE}"
-            HF_ENDPOINT=https://hf-mirror.com /workspace/scripts/publish-release.py
+            HF_ENDPOINT=https://hf-mirror.com /workspace/scripts/db-insert.py
             
-            echo "=== Publish-release step completed at $(date) ==="
+            echo "=== db-insert step completed at $(date) ==="
             echo "=== Workflow completed successfully at $(date) ==="
         volumeMounts:
           - name: workspace
