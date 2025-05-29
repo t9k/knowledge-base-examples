@@ -75,17 +75,12 @@ spec:
             # Check env config for valid collection names
             if [ -f /env-config/env.properties ]; then
               source /env-config/env.properties
-              if [ -n "$COLLECTION_NAME_TEXT" ] && ! [[ $COLLECTION_NAME_TEXT =~ ^[a-zA-Z0-9_]+$ ]]; then
-                echo "Error: COLLECTION_NAME_TEXT='$COLLECTION_NAME_TEXT' is invalid. Collection names can only contain numbers, letters, and underscores."
-                exit 1
-              fi
-              if [ -n "$COLLECTION_NAME_IMAGE" ] && ! [[ $COLLECTION_NAME_IMAGE =~ ^[a-zA-Z0-9_]+$ ]]; then
-                echo "Error: COLLECTION_NAME_IMAGE='$COLLECTION_NAME_IMAGE' is invalid. Collection names can only contain numbers, letters, and underscores."
+              if [ -n "$COLLECTION_NAME" ] && ! [[ $COLLECTION_NAME =~ ^[a-zA-Z0-9_]+$ ]]; then
+                echo "Error: COLLECTION_NAME='$COLLECTION_NAME' is invalid. Collection names can only contain numbers, letters, and underscores."
                 exit 1
               fi
               
-              echo "Text collection name: $COLLECTION_NAME_TEXT"
-              echo "Image collection name: $COLLECTION_NAME_IMAGE"
+              echo "Collection name: $COLLECTION_NAME"
             fi
             
             git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
@@ -133,7 +128,7 @@ spec:
           - name: database-name
           - name: log-timestamp
       container:
-        image: registry.cn-hangzhou.aliyuncs.com/t9k/pytorch:2.3.0-milvus-bgem3-enflame
+        image: registry.qy.t9kcloud.cn/topsrider/pytorch:2.3.0-milvus-bgem3-enflame
         command: [/bin/bash, -c]
         args:
           - |

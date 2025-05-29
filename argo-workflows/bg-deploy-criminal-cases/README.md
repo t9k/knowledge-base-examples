@@ -6,10 +6,9 @@
 
 工作流执行以下步骤：
 
-1. **下载文件**：从互联网下载刑法案例数据文件并解压
-2. **发布版本**：
-  1. **创建数据库**：创建新的 Milvus Database，以及其下的一个 Collection
-  2. **插入数据**：处理案例数据文件：逐行处理，分块、提取元数据、创建嵌入向量，并将数据插入到 Database 下的 Collection 中
+1. **准备（prepare）**：检查参数格式，拉取后续步骤要执行的脚本
+2. **下载文件（download）**：从互联网下载刑法案例数据文件并解压
+3. **插入数据（db-insert）**：创建新的 Milvus Database，以及其下的一个 Collection；处理案例数据文件：逐行处理，分块、提取元数据、创建嵌入向量，并将数据插入到 Database 下的 Collection 中
 
 ## 文件说明
 
@@ -47,7 +46,13 @@ ConfigMap bg-deploy-criminal-cases-config 包含以下环境变量：
 
 这样可以在不影响现有数据库的情况下进行部署，部署完成后可以将应用切换到新数据库。
 
-## 设置步骤
+## 镜像
+
+步骤**插入数据（db-insert）**所使用的镜像由 [Dockerfile](./Dockerfile) 定义，其安装了 `pymilvus[model]`、`langchain_text_splitters` 等库，并预下载了 bge-m3 模型。
+
+注意：镜像仓库 `registry.qy.t9kcloud.cn` 属于燧原庆阳集群，未开放公网访问。
+
+## 运行
 
 1. 创建 ConfigMap：
    ```bash
@@ -64,14 +69,13 @@ ConfigMap bg-deploy-criminal-cases-config 包含以下环境变量：
    kubectl apply -f bg-deploy-template.yaml
    ```
 
-## 手动执行
+4. 终端运行工作流：
+  ```bash
+  argo submit --from workflowtemplate/bg-deploy-criminal-cases \
+    -p database-name=<your-database-name>
+  ```
 
-手动运行工作流：
-
-```bash
-argo submit --from workflowtemplate/bg-deploy-criminal-cases \
-  -p database-name=<your-database-name>
-```
+或进入 Argo Workflows 的 Web UI 操作以运行工作流。
 
 ## TODO
 
