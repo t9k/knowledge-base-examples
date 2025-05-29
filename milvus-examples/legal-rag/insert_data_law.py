@@ -138,27 +138,33 @@ def chunk_text(text):
 
             # 提取文本块（包含分隔符）
             chunk_text = text_content[start_pos:end_pos]
-            
+
             # 如果是 <!-- INFO END --> 分隔符，不包含在文本中
             if chunk_text.startswith("<!-- INFO END -->"):
                 chunk_text = chunk_text[len("<!-- INFO END -->"):].strip()
 
             # 提取文章编号
-            article = None
+            article = 0
+            article_amended = 0
             article_match = re.search(r'第([零一二三四五六七八九十百千]+)条 ', chunk_text)
             if article_match:
                 article = chinese_to_arabic(article_match.group(0))
 
             # 如果没找到文章编号，尝试查找列表项目符号
-            if article is None:
+            if article == 0:
                 item_match = re.search(r'([一二三四五六七八九十]+)、', chunk_text)
                 if item_match:
                     article = chinese_to_arabic(item_match.group(0))
+                article_amended_match = re.search(r'第([零一二三四五六七八九十百千]+)条',
+                                                  chunk_text)
+                if article_amended_match:
+                    article_amended = chinese_to_arabic(
+                        article_amended_match.group(0))
 
             # 创建新的元数据，包含原始元数据和文章编号
             new_metadata = metadata.copy()
-            if article is not None:
-                new_metadata["article"] = article
+            new_metadata["article"] = article
+            new_metadata["article_amended"] = article_amended
 
             chunks.append(
                 Document(page_content=chunk_text, metadata=new_metadata))
@@ -179,6 +185,7 @@ def setup_milvus_collection(dense_dim):
         FieldSchema(name="chapter", dtype=DataType.VARCHAR, max_length=100),
         FieldSchema(name="section", dtype=DataType.VARCHAR, max_length=100),
         FieldSchema(name="article", dtype=DataType.INT64),
+        FieldSchema(name="article_amended", dtype=DataType.INT64),
         FieldSchema(name="sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         FieldSchema(name="dense_vector",
                     dtype=DataType.FLOAT_VECTOR,
@@ -209,15 +216,17 @@ def record_generator(md_path):
 
     for page in pages:
         chunk = page.page_content
-        metadata = page.metadata
+        if len(chunk) <= 3:
+            continue
 
-        # 获取元数据
+        metadata = page.metadata
         metadata = {
             "law": metadata["law"],
             "part": metadata.get("part", ""),
             "chapter": metadata.get("chapter", ""),
             "section": metadata.get("section", ""),
-            "article": metadata.get("article", 0)
+            "article": metadata.get("article", 0),
+            "article_amended": metadata.get("article_amended", 0),
         }
 
         yield {"chunk_id": str(uuid.uuid4()), "chunk": chunk, **metadata}
@@ -239,6 +248,7 @@ def insert_data_streaming(col, record_iter, ef, batch_size=BATCH_SIZE):
                 [r["chapter"] for r in buffer],
                 [r["section"] for r in buffer],
                 [r["article"] for r in buffer],
+                [r["article_amended"] for r in buffer],
                 embeddings["sparse"],
                 embeddings["dense"],
             ]
@@ -257,6 +267,7 @@ def insert_data_streaming(col, record_iter, ef, batch_size=BATCH_SIZE):
             [r["chapter"] for r in buffer],
             [r["section"] for r in buffer],
             [r["article"] for r in buffer],
+            [r["article_amended"] for r in buffer],
             embeddings["sparse"],
             embeddings["dense"],
         ]
@@ -271,6 +282,9 @@ def main():
     parser.add_argument(
         'md_path',
         help='Path to Markdown file or directory containing Markdown files')
+    parser.add_argument('--use-gcu',
+                        help='Use Enflame GCU for embedding',
+                        action='store_true')
     args = parser.parse_args()
 
     path = args.md_path
@@ -297,7 +311,14 @@ def main():
         print(f"Path not found: {path}")
         return
 
-    ef = BGEM3EmbeddingFunction(use_fp16=False, device="cpu")
+    if args.use_gcu:
+        import torch
+        import torch_gcu
+        ef = BGEM3EmbeddingFunction(use_fp16=False, device="gcu")
+        print("Using Enflame GCU for embedding")
+    else:
+        ef = BGEM3EmbeddingFunction(use_fp16=False, device="cpu")
+        print("Using CPU for embedding")
     dense_dim = ef.dim["dense"]
     col = setup_milvus_collection(dense_dim)
 
