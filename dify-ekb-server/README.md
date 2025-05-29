@@ -13,15 +13,15 @@
 - 支持元数据筛选
 - 详细的日志和错误信息
 
-## 部署
+## Kubernetes 部署
 
-### Docker 部署
-
-构建并运行容器：
+修改 `k8s.yaml` 中的 ConfigMap 和 Secret 的配置，然后执行以下命令以部署：
 
 ```bash
-docker run -p 5001:5001 -e "MILVUS_HOST=host.docker.internal" milvus-external-knowledge
+kubectl apply -f k8s.yaml
 ```
+
+如要部署多个服务，手动替换 dify-ekb-server 为其增加名称后缀（镜像 ID 除外），如 dify-ekb-server-law、dify-ekb-server-criminal-cases。
 
 ## 混合检索支持
 
@@ -36,26 +36,32 @@ docker run -p 5001:5001 -e "MILVUS_HOST=host.docker.internal" milvus-external-kn
 
 ## Milvus Collection 要求
 
-为了使服务正常工作，Milvus Collection 需要包含以下字段：
+为了使服务正常工作，scenario 为 `law` 时，Milvus Collection 需要包含以下字段：
 
-### 必需字段
+* chunk_id (VarChar)：chunk 的 uuid
+* chunk (VarChar)：chunk 的内容
+* law (VarChar)：所属法律
+* part (VarChar)：所属编
+* chapter (VarChar)：所属章
+* section (VarChar)：所属节
+* article (Int64)：法条序号（0 表示没有序号）
+* article_amended (Int64)：修正的刑法法条序号（0 表示没有修正刑法法条）
+* sparse_vector (SparseFloatVector)：稀疏嵌入
+* dense_vector	(FloatVector)：密集嵌入
 
-- `dense_vector`: 密集向量字段
-- `sparse_vector`: 稀疏向量字段
-- `fact`: 文档内容
-- `pk`: 文档ID/标题
+scenario 为 `criminal-cases` 时，Milvus Collection 需要包含以下字段：
 
-### 可选元数据字段
-
-- `relevant_articles`
-- `accusation`
-- `punish_of_money`
-- `criminals`
-- `imprisonment`
-- `life_imprisonment`
-- `death_penalty`
-
-> 注意：字段名可在代码中的 `output_fields` 列表调整以匹配您的集合结构。
+* chunk_id (VarChar)：chunk 的 uuid
+* chunk (VarChar)：chunk 的内容
+* relevant_articles (Array[Int64])：相关法条
+* accusation (Array[VarChar])：罪名
+* punish_of_money (Int64)：罚金
+* criminals (Array[VarChar])：被告人/罪犯
+* imprisonment (Int64)：刑期（单位：月）
+* life_imprisonment (Bool)：是否无期徒刑
+* death_penalty (Bool)：是否死刑
+* sparse_vector (SparseFloatVector)：稀疏嵌入
+* dense_vector	(FloatVector)：密集嵌入
 
 ## API 使用示例
 
@@ -174,16 +180,4 @@ curl -X POST http://localhost:5001/retrieval \
   "error_code": 2001,
   "error_msg": "Knowledge base 'your_collection' not found"
 }
-```
-
-## 环境变量
-
-服务支持以下环境变量：
-
-- `DEBUG_MODE`: 设置为 "true" 启用详细日志记录，默认为 "false"
-
-例如：
-
-```bash
-DEBUG_MODE=true python app.py
 ```

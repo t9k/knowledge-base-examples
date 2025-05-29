@@ -8,58 +8,11 @@ import os
 import sys
 from functools import wraps
 
-# 加载环境变量配置
-MILVUS_CONFIG = {
-    "host": os.environ.get("MILVUS_HOST", "localhost"),
-    "port": os.environ.get("MILVUS_PORT", "19530"),
-    "token": os.environ.get("MILVUS_TOKEN", ""),
-    # 默认检索模式: dense(密集向量), sparse(稀疏向量), hybrid(混合检索)
-    "search_mode": os.environ.get("SEARCH_MODE", "hybrid"),
-    # 密集向量检索配置
-    "dense_search": {
-        "dense_field": os.environ.get("DENSE_FIELD", "dense_vector"),
-        "params": {
-            "metric_type": os.environ.get("DENSE_METRIC_TYPE", "COSINE"),
-            "params": {}
-        }
-    },
-    # 稀疏向量检索配置
-    "sparse_search": {
-        "sparse_field": os.environ.get("SPARSE_FIELD", "sparse_vector"),
-        "params": {
-            "metric_type": os.environ.get("SPARSE_METRIC_TYPE", "IP"),
-            "params": {}
-        }
-    },
-    # 混合检索配置
-    "hybrid_search": {
-        "dense_field": os.environ.get("DENSE_FIELD", "dense_vector"),
-        "sparse_field": os.environ.get("SPARSE_FIELD", "sparse_vector"),
-        "dense_params": {
-            "metric_type": os.environ.get("DENSE_METRIC_TYPE", "COSINE"),
-            "params": {}
-        },
-        "sparse_params": {
-            "metric_type": os.environ.get("SPARSE_METRIC_TYPE", "IP"),
-            "params": {}
-        },
-        "rrf_k": int(os.environ.get("HYBRID_RRF_K", "60"))
-    },
-    # 嵌入模型配置
-    "embedding": {
-        "use_fp16": os.environ.get("USE_FP16", "false").lower() == "true",
-        "device": os.environ.get("DEVICE", "cpu")
-    }
-}
-
-# API密钥配置，从环境变量加载
-API_KEYS = []
-if os.environ.get("API_KEY"):
-    API_KEYS.append(os.environ.get("API_KEY"))
+from config import MILVUS_CONFIG, OTHER_CONFIG, API_KEYS
 
 # 设置环境变量来控制更详细的调试输出
-DEBUG_MODE = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
-if DEBUG_MODE:
+debug_mode = OTHER_CONFIG["debug_mode"]
+if debug_mode:
     logging.basicConfig(
         level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -69,7 +22,7 @@ else:
         level="INFO",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-logging.info(f"Application starting with DEBUG_MODE={DEBUG_MODE}")
+logging.info(f"Application starting with debug_mode={debug_mode}")
 
 app = Flask(__name__)
 
@@ -164,15 +117,19 @@ def log_response_info(response):
 
 
 # 初始化嵌入模型
-embedding_function = BGEM3EmbeddingFunction(
-    use_fp16=MILVUS_CONFIG["embedding"].get("use_fp16", False),
-    device=MILVUS_CONFIG["embedding"].get("device", "cpu"))
-logging.info("BGEM3 embedding model initialized")
-
-# Connect to Milvus
-uri = f"{MILVUS_CONFIG['host']}:{MILVUS_CONFIG['port']}"
-connections.connect(uri=uri, token=MILVUS_CONFIG["token"])
-logging.info("Connected to Milvus")
+device = OTHER_CONFIG["embedding"]["device"]
+use_fp16 = OTHER_CONFIG["embedding"]["use_fp16"]
+if device == "gcu":
+    import torch
+    import torch_gcu
+    embedding_function = BGEM3EmbeddingFunction(use_fp16=use_fp16,
+                                                device="gcu")
+elif device == "cpu":
+    embedding_function = BGEM3EmbeddingFunction(use_fp16=use_fp16,
+                                                device="cpu")
+else:
+    raise ValueError(f"Unsupported embedding device: {device}")
+logging.info(f"BGEM3 embedding model initialized on {device}")
 
 
 # 健康检查端点 - 不需要认证
@@ -506,8 +463,13 @@ def retrieval():
             milvus_filter = build_milvus_filter(metadata_condition)
             logging.info(f"Generated Milvus filter: {milvus_filter}")
 
+        # 连接到 Milvus
+        database_name, collection_name = data.get("knowledge_id").split("/")
+        uri = f"{MILVUS_CONFIG['host']}:{MILVUS_CONFIG['port']}"
+        connections.connect(uri=uri, token=MILVUS_CONFIG["token"], db_name=database_name)
+        logging.info("Connected to Milvus")
+
         # 获取请求参数
-        collection_name = data.get("knowledge_id")
         query_text = data.get("query")
         top_k = retrieval_setting.get("top_k", 10)
 
@@ -526,20 +488,28 @@ def retrieval():
             collection = Collection(collection_name)
             collection.load()
 
+            scenario = OTHER_CONFIG["scenario"]
+
             # 需要输出的字段
-            output_fields = [
-                "chunk", "relevant_articles", "accusation", "punish_of_money",
-                "criminal", "imprisonment", "life_imprisonment",
-                "death_penalty"
-            ]
+            if scenario == "law":
+                output_fields = [
+                    "chunk", "law", "part", "chapter", "section", "article",
+                    "article_amended"
+                ]
+            elif scenario == "criminal-cases":
+                output_fields = [
+                    "chunk", "relevant_articles", "accusation",
+                    "punish_of_money", "criminals", "imprisonment",
+                    "life_imprisonment", "death_penalty"
+                ]
 
             # 执行搜索
             results = perform_search(collection,
-                                        query_text,
-                                        search_mode,
-                                        limit=top_k,
-                                        expr=milvus_filter,
-                                        output_fields=output_fields)
+                                     query_text,
+                                     search_mode,
+                                     limit=top_k,
+                                     expr=milvus_filter,
+                                     output_fields=output_fields)
 
             # 格式化搜索结果
             records = []
@@ -552,11 +522,11 @@ def retrieval():
                 else:
                     # 根据搜索模式和度量类型转换分数
                     if search_mode == "dense":
-                        metric_type = MILVUS_CONFIG["dense_search"][
-                            "params"]["metric_type"].upper()
+                        metric_type = MILVUS_CONFIG["dense_search"]["params"][
+                            "metric_type"].upper()
                     else:  # sparse
-                        metric_type = MILVUS_CONFIG["sparse_search"][
-                            "params"]["metric_type"].upper()
+                        metric_type = MILVUS_CONFIG["sparse_search"]["params"][
+                            "metric_type"].upper()
 
                     if metric_type == "L2":
                         score = max(0.0, min(1.0, 1.0 / (1.0 + hit.score)))
@@ -579,17 +549,36 @@ def retrieval():
                     continue
 
                 # 准备记录
-                record = {
-                    "score": score,
-                    "title": hit.chunk_id,
-                    "content": hit.chunk,
-                    "metadata": {
+                if scenario == "law":
+                    metadata = {
+                        "law": hit.law,
+                        "part": hit.part,
+                        "chapter": hit.chapter,
+                        "section": hit.section,
+                        "article": hit.article,
+                        "article_amended": hit.article_amended
+                    }
+                elif scenario == "criminal-cases":
+                    metadata = {
                         "relevant_articles": list(hit.relevant_articles),
                         "accusation": list(hit.accusation),
                         "punish_of_money": hit.punish_of_money,
-                        "criminal": hit.criminal,
+                        "criminals": list(hit.criminals),
                         "imprisonment": hit.imprisonment,
+                        "life_imprisonment": hit.life_imprisonment,
+                        "death_penalty": hit.death_penalty
                     }
+
+                content = hit.chunk
+                if OTHER_CONFIG["result"]["include_metadata"]:
+                    content += "\n\n" + json.dumps(metadata,
+                                                   ensure_ascii=False)
+
+                record = {
+                    "score": score,
+                    "title": hit.chunk_id,
+                    "content": content,
+                    "metadata": metadata,
                 }
 
                 records.append(record)

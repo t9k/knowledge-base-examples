@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: dify-external-kb-server
+  name: dify-ekb-server
   labels:
-    app: dify-external-kb-server
+    app: dify-ekb-server
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: dify-external-kb-server
+      app: dify-ekb-server
   template:
     metadata:
       labels:
-        app: dify-external-kb-server
+        app: dify-ekb-server
     spec:
       containers:
-      - name: dify-external-kb-server
-        image: registry.cn-hangzhou.aliyuncs.com/t9k/dify-external-kb-server:20250509
+      - name: dify-ekb-server
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/dify-ekb-server:criminal-cases-20250529
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5001
@@ -25,80 +25,97 @@ spec:
         - name: MILVUS_HOST
           valueFrom:
             configMapKeyRef:
-              name: dify-external-kb-server-config
+              name: dify-ekb-server-config
               key: milvus_host
         - name: MILVUS_PORT
           valueFrom:
             configMapKeyRef:
-              name: dify-external-kb-server-config
+              name: dify-ekb-server-config
               key: milvus_port
         # 搜索模式配置
         - name: SEARCH_MODE
           valueFrom:
             configMapKeyRef:
-              name: dify-external-kb-server-config
+              name: dify-ekb-server-config
               key: search_mode
         # 密集向量配置
         - name: DENSE_FIELD
           valueFrom:
             configMapKeyRef:
-              name: dify-external-kb-server-config
+              name: dify-ekb-server-config
               key: dense_field
         - name: DENSE_METRIC_TYPE
           valueFrom:
             configMapKeyRef:
-              name: dify-external-kb-server-config
+              name: dify-ekb-server-config
               key: dense_metric_type
         # 稀疏向量配置
         - name: SPARSE_FIELD
           valueFrom:
             configMapKeyRef:
-              name: dify-external-kb-server-config
+              name: dify-ekb-server-config
               key: sparse_field
         - name: SPARSE_METRIC_TYPE
           valueFrom:
             configMapKeyRef:
-              name: dify-external-kb-server-config
+              name: dify-ekb-server-config
               key: sparse_metric_type
         # 混合搜索配置
         - name: HYBRID_RRF_K
           valueFrom:
             configMapKeyRef:
-              name: dify-external-kb-server-config
+              name: dify-ekb-server-config
               key: hybrid_rrf_k
         # 嵌入模型配置
         - name: USE_FP16
           valueFrom:
             configMapKeyRef:
-              name: dify-external-kb-server-config
+              name: dify-ekb-server-config
               key: use_fp16
         - name: DEVICE
           valueFrom:
             configMapKeyRef:
-              name: dify-external-kb-server-config
+              name: dify-ekb-server-config
               key: device
+        # 检索结果配置
+        - name: INCLUDE_METADATA
+          valueFrom:
+            configMapKeyRef:
+              name: dify-ekb-server-config
+              key: include_metadata
+        # 调试模式
+        - name: DEBUG_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: dify-ekb-server-config
+              key: debug_mode
+        # 场景配置
+        - name: SCENARIO
+          valueFrom:
+            configMapKeyRef:
+              name: dify-ekb-server-config
+              key: scenario
         # API密钥
         - name: API_KEY
           valueFrom:
             secretKeyRef:
-              name: dify-external-kb-server-secret
+              name: dify-ekb-server-secret
               key: api_key
         # Milvus Token
         - name: MILVUS_TOKEN
           valueFrom:
             secretKeyRef:
-              name: dify-external-kb-server-secret
+              name: dify-ekb-server-secret
               key: milvus_token
-        # 调试模式
-        - name: DEBUG_MODE
-          value: "false"
         resources:
           requests:
-            memory: "4Gi"
             cpu: "2"
+            memory: "4Gi"
+            enflame.com/gcu: 1
           limits:
-            memory: "8Gi"
             cpu: "4"
+            memory: "8Gi"
+            enflame.com/gcu: 1
         readinessProbe:
           httpGet:
             path: /health
@@ -116,10 +133,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: dify-external-kb-server
+  name: dify-ekb-server
 spec:
   selector:
-    app: dify-external-kb-server
+    app: dify-ekb-server
   ports:
   - port: 80
     targetPort: 5001
@@ -129,35 +146,44 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: dify-external-kb-server-config
+  name: dify-ekb-server-config
 data:
   # Milvus连接配置
   milvus_host: "milvus-standalone"
   milvus_port: "19530"
   
-  # 默认搜索模式
-  search_mode: "hybrid"
+  # 检索模式
+  search_mode: "hybrid"  # or "dense", "sparse"
   
-  # 密集向量配置
+  # 密集向量配置（密集/混合检索模式下采用）
   dense_field: "dense_vector"
   dense_metric_type: "COSINE"
   
-  # 稀疏向量配置
+  # 稀疏向量配置（稀疏/混合检索模式下采用）
   sparse_field: "sparse_vector"
   sparse_metric_type: "IP"
   
-  # 混合搜索配置
+  # 混合检索配置（混合检索模式下采用）
   hybrid_rrf_k: "60"
   
   # 嵌入模型配置
   use_fp16: "false"
-  device: "cpu"
+  device: "gcu"
+
+  # 检索结果配置
+  include_metadata: "true"
+
+  # 调试模式
+  debug_mode: "false"
+
+  # 场景配置
+  scenario: "law"  # or "criminal-cases"
 
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: dify-external-kb-server-secret
+  name: dify-ekb-server-secret
 type: Opaque
 stringData:
   api_key: "t9k-12345"  # 生产环境应替换为强随机密钥
