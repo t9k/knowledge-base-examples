@@ -1,8 +1,7 @@
 import argparse
 import os
-import json
-import uuid
 import re
+import uuid
 from tqdm import tqdm
 from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 from pymilvus import (
