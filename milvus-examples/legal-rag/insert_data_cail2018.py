@@ -358,27 +358,43 @@ def process_llm_metadata_parallel(records, llm_client, max_workers=4):
     """
 
     def process_single_record(record):
-        try:
-            chunk = record["chunk"]
-            extracted_metadata = extract_metadata_with_llm(chunk, llm_client)
-            record.update(extracted_metadata)
-            return record
-        except Exception as e:
-            print(
-                f"Error processing chunk {record.get('chunk_id', 'unknown')}: {e}"
-            )
-            # 返回带有默认值的记录
-            record.update({
-                "dates": ["<unknown>"],
-                "locations": ["<unknown>"],
-                "people": {
-                    "names": ["<unknown>"],
-                    "roles": ["<unknown>"],
-                    "occupations": ["<unknown>"]
-                },
-                "defendant": "<unknown>"
-            })
-            return record
+        chunk = record["chunk"]
+        chunk_id = record.get('chunk_id', 'unknown')
+        max_retries = 2  # 总共3次尝试（初始1次 + 重试2次）
+
+        for attempt in range(max_retries + 1):
+            try:
+                extracted_metadata = extract_metadata_with_llm(
+                    chunk, llm_client)
+                record.update(extracted_metadata)
+                return record
+            except Exception as e:
+                if attempt < max_retries:
+                    # 不是最后一次尝试，等待后重试
+                    wait_time = (attempt + 1) * 2  # 递增等待时间：2s, 4s
+                    print(
+                        f"Chunk {chunk_id}: Attempt {attempt + 1} failed, retrying in {wait_time}s..."
+                    )
+                    import time
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    # 最后一次尝试失败，打印错误并返回默认值
+                    print(
+                        f"Error processing chunk {chunk_id} after {max_retries + 1} attempts: {e}"
+                    )
+                    # 返回带有默认值的记录
+                    record.update({
+                        "dates": ["<unknown>"],
+                        "locations": ["<unknown>"],
+                        "people": {
+                            "names": ["<unknown>"],
+                            "roles": ["<unknown>"],
+                            "occupations": ["<unknown>"]
+                        },
+                        "defendant": "<unknown>"
+                    })
+                    return record
 
     # 使用线程池并行处理非parent记录
     processed_records = []

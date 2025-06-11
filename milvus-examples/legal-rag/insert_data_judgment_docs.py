@@ -32,10 +32,27 @@ CHAT_MODEL = "Qwen2.5-72B-Instruct"
 SYSTEM_PROMPT = "你是一名精确的法律信息提取助手，擅长从裁判文书中提取关键元素。"
 
 
-# 读取 csv 文件
-def read_csv(file_path):
-    df = pd.read_csv(file_path)
-    return df.to_dict('records')
+# 流式读取 csv 文件
+def read_csv_streaming(file_path, chunksize):
+    """
+    流式读取CSV文件，避免大文件内存问题
+    
+    Args:
+        file_path: CSV文件路径
+        chunksize: 每次读取的行数
+    
+    Yields:
+        dict: 每一行的数据字典
+    """
+    try:
+        # 使用chunksize参数进行分块读取
+        for chunk in pd.read_csv(file_path, chunksize=chunksize):
+            # 将每个chunk转换为字典列表，然后逐行yield
+            for record in chunk.to_dict('records'):
+                yield record
+    except Exception as e:
+        print(f"Error reading CSV file {file_path}: {e}")
+        return
 
 
 # 解析法律依据文本，提取法律名称和条款
@@ -363,12 +380,12 @@ def setup_milvus_collection(dense_dim):
             FieldSchema(name="dates",
                         dtype=DataType.ARRAY,
                         element_type=DataType.VARCHAR,
-                        max_length=30,
+                        max_length=40,
                         max_capacity=20),
             FieldSchema(name="locations",
                         dtype=DataType.ARRAY,
                         element_type=DataType.VARCHAR,
-                        max_length=100,
+                        max_length=150,
                         max_capacity=20),
             FieldSchema(name="people", dtype=DataType.JSON),
             FieldSchema(name="numbers",
@@ -376,26 +393,7 @@ def setup_milvus_collection(dense_dim):
                         element_type=DataType.VARCHAR,
                         max_length=40,
                         max_capacity=20),
-            FieldSchema(name="plaintiff",
-                        dtype=DataType.ARRAY,
-                        element_type=DataType.VARCHAR,
-                        max_length=40,
-                        max_capacity=10),
-            FieldSchema(name="defendant",
-                        dtype=DataType.ARRAY,
-                        element_type=DataType.VARCHAR,
-                        max_length=40,
-                        max_capacity=10),
-            FieldSchema(name="original_plaintiff",
-                        dtype=DataType.ARRAY,
-                        element_type=DataType.VARCHAR,
-                        max_length=40,
-                        max_capacity=10),
-            FieldSchema(name="original_defendant",
-                        dtype=DataType.ARRAY,
-                        element_type=DataType.VARCHAR,
-                        max_length=40,
-                        max_capacity=10)
+            FieldSchema(name="parties_llm", dtype=DataType.JSON)
         ])
     schema = CollectionSchema(fields)
     if utility.has_collection(COLLECTION_NAME):
@@ -417,8 +415,15 @@ def setup_milvus_collection(dense_dim):
     return col, parent_col
 
 
-def record_generator(csv_path):
-    for item in read_csv(csv_path):
+def record_generator(csv_path, chunksize):
+    """
+    生成处理后的记录，支持流式读取大CSV文件
+    
+    Args:
+        csv_path: CSV文件路径
+        chunksize: 每次读取的行数，用于控制内存使用
+    """
+    for item in read_csv_streaming(csv_path, chunksize=chunksize):
         if pd.isna(item["全文"]):
             continue
         full_text = item["全文"].replace(",", "，").replace(";", "；")
@@ -514,33 +519,44 @@ def process_llm_metadata_parallel(records, llm_client, max_workers=4):
     """
 
     def process_single_record(record):
-        try:
-            chunk = record["chunk"]
-            extracted_metadata = extract_metadata_with_llm(chunk, llm_client)
-            record.update(extracted_metadata)
-            return record
-        except Exception as e:
-            print(
-                f"Error processing chunk {record.get('chunk_id', 'unknown')}: {e}"
-            )
-            # 返回带有默认值的记录
-            record.update({
-                "dates": ["<unknown>"],
-                "locations": ["<unknown>"],
-                "people": {
-                    "names": ["<unknown>"],
-                    "roles": ["<unknown>"],
-                    "occupations": ["<unknown>"]
-                },
-                "numbers": ["<unknown>"],
-                "parties_llm": {
-                    "plaintiff": ["<unknown>"],
-                    "defendant": ["<unknown>"],
-                    "original_plaintiff": ["<unknown>"],
-                    "original_defendant": ["<unknown>"]
-                }
-            })
-            return record
+        chunk = record["chunk"]
+        chunk_id = record.get('chunk_id', 'unknown')
+        max_retries = 4  # 总共5次尝试（初始1次 + 重试4次）
+        
+        for attempt in range(max_retries + 1):
+            try:
+                extracted_metadata = extract_metadata_with_llm(chunk, llm_client)
+                record.update(extracted_metadata)
+                return record
+            except Exception as e:
+                if attempt < max_retries:
+                    # 不是最后一次尝试，等待后重试
+                    wait_time = (attempt + 1) * 2  # 递增等待时间：2s, 4s
+                    print(f"Chunk {chunk_id}: Attempt {attempt + 1} failed, retrying in {wait_time}s...")
+                    import time
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    # 最后一次尝试失败，打印错误并返回默认值
+                    print(f"Error processing chunk {chunk_id} after {max_retries + 1} attempts: {e}")
+                    # 返回带有默认值的记录
+                    record.update({
+                        "dates": ["<unknown>"],
+                        "locations": ["<unknown>"],
+                        "people": {
+                            "names": ["<unknown>"],
+                            "roles": ["<unknown>"],
+                            "occupations": ["<unknown>"]
+                        },
+                        "numbers": ["<unknown>"],
+                        "parties_llm": {
+                            "plaintiff": ["<unknown>"],
+                            "defendant": ["<unknown>"],
+                            "original_plaintiff": ["<unknown>"],
+                            "original_defendant": ["<unknown>"]
+                        }
+                    })
+                    return record
 
     # 使用线程池并行处理非parent记录
     processed_records = []
@@ -723,6 +739,11 @@ def main():
         type=int,
         default=4,
         help='Number of threads for LLM processing (default: 4)')
+    parser.add_argument(
+        '--csv-chunksize',
+        type=int,
+        default=100000,
+        help='CSV reading chunk size for memory efficiency (default: 100k)')
     args = parser.parse_args()
 
     path = args.csv_path
@@ -770,8 +791,7 @@ def main():
         print(f"Processing file: {csv_path}")
         if IS_LLM_EXTRACT:
             print(f"Using {args.llm_workers} workers for LLM processing")
-        insert_data_streaming(col, parent_col,
-                              record_generator(csv_path, llm_client), ef,
+        insert_data_streaming(col, parent_col, record_generator(csv_path, args.csv_chunksize), ef,
                               llm_client, args.llm_workers)
 
     print("All files processed successfully")
