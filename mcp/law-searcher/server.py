@@ -4,6 +4,9 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Optional, List
 from dotenv import load_dotenv
 from fastmcp import FastMCP, Context
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
+import uvicorn
 from pymilvus import (
     connections,
     Collection,
@@ -560,13 +563,14 @@ async def civil_code_hybrid_search(
     return output
 
 
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request) -> PlainTextResponse:
+    return PlainTextResponse("OK")
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Milvus MCP Server")
     parser.add_argument("--sse", action="store_true", help="Enable SSE mode")
-    parser.add_argument("--port",
-                        type=int,
-                        default=8000,
-                        help="Port number for SSE server")
     return parser.parse_args()
 
 
@@ -585,10 +589,13 @@ def main():
         "civil_code_collection_name":
         os.environ.get("MILVUS_COLLECTION_CIVIL_CODE"),
     }
+
     if args.sse:
-        mcp.run(transport="sse", port=args.port, host="0.0.0.0")
+        sse_app = mcp.http_app(transport="sse")
+        uvicorn.run(sse_app, host="0.0.0.0", port=8000)
     else:
-        mcp.run()
+        sse_app = mcp.http_app(transport="streamable-http")
+        uvicorn.run(sse_app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
