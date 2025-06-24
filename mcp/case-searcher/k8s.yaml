@@ -1,24 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mcp-server-law-searcher
+  name: mcp-server-case-searcher
   labels:
-    app: mcp-server-law-searcher
+    app: mcp-server-case-searcher
     version: v1
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mcp-server-law-searcher
+      app: mcp-server-case-searcher
       version: v1
   template:
     metadata:
       labels:
-        app: mcp-server-law-searcher
+        app: mcp-server-case-searcher
         version: v1
     spec:
       containers:
-      - name: mcp-server-law-searcher
+      - name: mcp-server-case-searcher
         image: registry.qy.t9kcloud.cn/topsrider/mcp-server:law-searcher-20250624
         imagePullPolicy: Always
         # args: ["--sse"]
@@ -27,7 +27,7 @@ spec:
           name: http
         envFrom:
         - configMapRef:
-            name: mcp-server-law-searcher-config
+            name: mcp-server-case-searcher-config
         livenessProbe:
           httpGet:
             path: /health
@@ -69,12 +69,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: mcp-server-law-searcher-service
+  name: mcp-server-case-searcher-service
   labels:
-    app: mcp-server-law-searcher
+    app: mcp-server-case-searcher
 spec:
   selector:
-    app: mcp-server-law-searcher
+    app: mcp-server-case-searcher
   ports:
   - name: http
     port: 80
@@ -87,7 +87,7 @@ spec:
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
 metadata:
-  name: mcp-server-law-searcher-vs
+  name: mcp-server-case-searcher-vs
 spec:
   hosts:
   - '*'
@@ -101,7 +101,7 @@ spec:
       uri: /
     route:
     - destination:
-        host: mcp-server-law-searcher-service
+        host: mcp-server-case-searcher-service
         port:
           number: 80
     timeout: 30s
@@ -114,10 +114,12 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: mcp-server-law-searcher-config
+  name: mcp-server-case-searcher-config
 data:
   MILVUS_URI: "http://app-milvus-xxxxxxxx.demo.svc.cluster.local:19530"
   MILVUS_TOKEN: "root:Milvus"
   MILVUS_DB: "default"
-  MILVUS_COLLECTION_CRIMINAL_LAW: "criminal_law"
-  MILVUS_COLLECTION_CIVIL_CODE: "civil_code"
+  MILVUS_COLLECTION_CRIMINAL_CASE: "criminal_case"
+  MILVUS_COLLECTION_CRIMINAL_CASE_PARENT: "criminal_case_parent"
+  MILVUS_COLLECTION_CIVIL_CASE: "civil_case"
+  MILVUS_COLLECTION_CIVIL_CASE_PARENT: "civil_case_parent"

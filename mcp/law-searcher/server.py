@@ -1,9 +1,12 @@
 import argparse
 import os
 from contextlib import asynccontextmanager
+import logging
 from typing import Any, AsyncIterator, Optional, List
 from dotenv import load_dotenv
 from fastmcp import FastMCP, Context
+from fastmcp.server.auth import BearerAuthProvider
+from fastmcp.server.auth.providers.bearer import RSAKeyPair
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 import uvicorn
@@ -16,6 +19,9 @@ from pymilvus import (
 from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 import torch
 import torch_gcu
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 ef = BGEM3EmbeddingFunction(use_fp16=False, device="gcu")
 
@@ -255,7 +261,10 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[MilvusContext]:
         pass
 
 
-mcp = FastMCP(name="Milvus", lifespan=server_lifespan)
+key_pair = RSAKeyPair.generate()
+auth = BearerAuthProvider(public_key=key_pair.public_key)
+mcp = FastMCP(name="Milvus", lifespan=server_lifespan, auth=auth)
+token = key_pair.create_token()
 
 
 @mcp.tool()
@@ -267,14 +276,19 @@ async def criminal_law_query(
     """
     使用过滤表达式查询刑法 Collection。
 
-    需要注意的是：
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 刑法及其修正案的名称
+    - part (VARCHAR): 编
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+    - article_amended (INT64): 所修改的刑法中的条（仅适用于刑法修正案）
+
+    注意：
     
     1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
     "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
-
-    2. 刑法及其修正案的"名称"对应字段"law"，"编"对应字段"part"，"章"对应字段"chapter"，
-    "节"对应字段"section"，"条"对应字段"article"，"所修改的刑法中的条"对应字段"article_amended"
-    （仅刑法修正案有该字段）。
 
     Args:
         filter_expr: Filter expression, e.g. 'law == "中华人民共和国刑法" and article == 123',
@@ -304,19 +318,24 @@ async def criminal_law_sparse_search(
     """
     稀疏检索刑法 Collection。适用于专有名词。
 
-    需要注意的是：
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 刑法及其修正案的名称
+    - part (VARCHAR): 编
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+    - article_amended (INT64): 所修改的刑法中的条（仅适用于刑法修正案）
+
+    注意：
     
     1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
     "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
 
-    2. 刑法及其修正案的"名称"对应字段"law"，"编"对应字段"part"，"章"对应字段"chapter"，
-    "节"对应字段"section"，"条"对应字段"article"，"所修改的刑法中的条"对应字段"article_amended"
-    （仅刑法修正案有该字段）。
-
     Args:
         query_text: Text to search for
         limit: Maximum number of results to return
-        filter_expr: Optional filter expression, e.g. 'chapter like "第三章%"', 'section == "%走私罪%"'
+        filter_expr: Optional filter expression for metadata filtering, e.g. 'chapter like "第三章%"', 'section == "%走私罪%"'
     """
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
@@ -342,19 +361,24 @@ async def criminal_law_dense_search(
     """
     密集检索刑法 Collection。适用于基于语义的检索。
 
-    需要注意的是：
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 刑法及其修正案的名称
+    - part (VARCHAR): 编
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+    - article_amended (INT64): 所修改的刑法中的条（仅适用于刑法修正案）
+
+    注意：
     
     1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
     "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
 
-    2. 刑法及其修正案的"名称"对应字段"law"，"编"对应字段"part"，"章"对应字段"chapter"，
-    "节"对应字段"section"，"条"对应字段"article"，"所修改的刑法中的条"对应字段"article_amended"
-    （仅刑法修正案有该字段）。
-
     Args:
         query_text: Text to search for
         limit: Maximum number of results to return
-        filter_expr: Optional filter expression, e.g. 'chapter like "第三章%"', 'section == "%走私罪%"'
+        filter_expr: Optional filter expression for metadata filtering, e.g. 'chapter like "第三章%"', 'section == "%走私罪%"'
     """
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(
@@ -380,19 +404,24 @@ async def criminal_law_hybrid_search(
     """
     混合检索刑法 Collection。适用于大多数情况。
 
-    需要注意的是：
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 刑法及其修正案的名称
+    - part (VARCHAR): 编
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+    - article_amended (INT64): 所修改的刑法中的条（仅适用于刑法修正案）
+
+    注意：
     
     1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
     "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
 
-    2. 刑法及其修正案的"名称"对应字段"law"，"编"对应字段"part"，"章"对应字段"chapter"，
-    "节"对应字段"section"，"条"对应字段"article"，"所修改的刑法中的条"对应字段"article_amended"
-    （仅刑法修正案有该字段）。
-
     Args:
         query_text: Text to search for
         limit: Maximum number of results to return
-        filter_expr: Optional filter expression, e.g. 'chapter like "第三章%"', 'section == "%走私罪%"'
+        filter_expr: Optional filter expression for metadata filtering, e.g. 'chapter like "第三章%"', 'section == "%走私罪%"'
     """
     connector = ctx.request_context.lifespan_context.connector
 
@@ -419,13 +448,19 @@ async def civil_code_query(
     """
     使用过滤表达式查询民法典 Collection。
 
-    需要注意的是：
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 民法典的名称
+    - part (VARCHAR): 编（包含分编）
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+
+    注意：
     
     1. 民法典分为"第一编 总则"、"第二编 物权编"、"第三编 合同编"、"第四编 人格权编"、"第五编 婚姻家庭编"、
     "第六编 继承编"、"第七编 侵权责任编"、"第八编 附则"，其中第二编、第三编下还有分编，例如
     "第二编 物权编 第一分编 通则"。
-
-    2. 民法典的"编"（包含分编）对应字段"part"，"章"对应字段"chapter"，"节"对应字段"section"，"条"对应字段"article"。
 
     Args:
         filter_expr: Filter expression, e.g. 'part == "第一编 总则" and article == 123',
@@ -454,20 +489,26 @@ async def civil_code_sparse_search(
     """
     稀疏检索民法典 Collection。适用于专有名词。
 
-    需要注意的是：
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 民法典的名称
+    - part (VARCHAR): 编（包含分编）
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+
+    注意：
     
     1. 民法典分为"第一编 总则"、"第二编 物权编"、"第三编 合同编"、"第四编 人格权编"、"第五编 婚姻家庭编"、
     "第六编 继承编"、"第七编 侵权责任编"、"第八编 附则"，其中第二编、第三编下还有分编，例如
     "第二编 物权编 第一分编 通则"。
 
-    2. 民法典的"编"（包含分编）对应字段"part"，"章"对应字段"chapter"，"节"对应字段"section"，"条"对应字段"article"。
-
-    3. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以取 20。
+    2. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以设为 20。
 
     Args:
         query_text: Text to search for
         limit: Maximum number of results to return.
-        filter_expr: Optional filter expression, e.g. 'part like "%婚姻家庭编%"', 'chapter like "%肖像权%"'
+        filter_expr: Optional filter expression for metadata filtering, e.g. 'part like "%婚姻家庭编%"', 'chapter like "%肖像权%"'
     """
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
@@ -493,20 +534,26 @@ async def civil_code_dense_search(
     """
     密集检索民法典 Collection。适用于基于语义的检索。
 
-    需要注意的是：
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 民法典的名称
+    - part (VARCHAR): 编（包含分编）
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+
+    注意：
     
     1. 民法典分为"第一编 总则"、"第二编 物权编"、"第三编 合同编"、"第四编 人格权编"、"第五编 婚姻家庭编"、
     "第六编 继承编"、"第七编 侵权责任编"、"第八编 附则"，其中第二编、第三编下还有分编，例如
     "第二编 物权编 第一分编 通则"。
 
-    2. 民法典的"编"（包含分编）对应字段"part"，"章"对应字段"chapter"，"节"对应字段"section"，"条"对应字段"article"。
-
-    3. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以取 20。
+    2. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以设为 20。
 
     Args:
         query_text: Text to search for
         limit: Maximum number of results to return.
-        filter_expr: Optional filter expression, e.g. 'part like "%婚姻家庭编%"', 'chapter like "%肖像权%"'
+        filter_expr: Optional filter expression for metadata filtering, e.g. 'part like "%婚姻家庭编%"', 'chapter like "%肖像权%"'
     """
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(
@@ -532,20 +579,26 @@ async def civil_code_hybrid_search(
     """
     混合检索民法典 Collection。适用于大多数情况。
 
-    需要注意的是：
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 民法典的名称
+    - part (VARCHAR): 编（包含分编）
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+
+    注意：
     
     1. 民法典分为"第一编 总则"、"第二编 物权编"、"第三编 合同编"、"第四编 人格权编"、"第五编 婚姻家庭编"、
     "第六编 继承编"、"第七编 侵权责任编"、"第八编 附则"，其中第二编、第三编下还有分编，例如
     "第二编 物权编 第一分编 通则"。
 
-    2. 民法典的"编"（包含分编）对应字段"part"，"章"对应字段"chapter"，"节"对应字段"section"，"条"对应字段"article"。
-
-    3. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以取 20。
+    2. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以设为 20。
 
     Args:
         query_text: Text to search for
         limit: Maximum number of results to return.
-        filter_expr: Optional filter expression, e.g. 'part like "%婚姻家庭编%"', 'chapter like "%肖像权%"'
+        filter_expr: Optional filter expression for metadata filtering, e.g. 'part like "%婚姻家庭编%"', 'chapter like "%肖像权%"'
     """
     connector = ctx.request_context.lifespan_context.connector
 
@@ -592,9 +645,11 @@ def main():
 
     if args.sse:
         sse_app = mcp.http_app(transport="sse")
+        logger.info("Token for Auth: %s", token)
         uvicorn.run(sse_app, host="0.0.0.0", port=8000)
     else:
         sse_app = mcp.http_app(transport="streamable-http")
+        logger.info("Token for Auth: %s", token)
         uvicorn.run(sse_app, host="0.0.0.0", port=8000)
 
 
