@@ -18,15 +18,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 配置
 MILVUS_URI = "http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
-PARENT_COLLECTION_NAME = "criminal_cases_parent"
+PARENT_COLLECTION_NAME = "criminal_case_parent"
 PARENT_CHUNK_SIZE = 4096
 PARENT_CHUNK_OVERLAP = 0
-COLLECTION_NAME = "criminal_cases"
+COLLECTION_NAME = "criminal_case"
 CHUNK_SIZE = 256
 CHUNK_OVERLAP = 32
 BATCH_SIZE = 1000
 CHAT_BASE_URL = "http://app-vllm-enflame-xxxxxxxx.namespace.svc.cluster.local/v1"
-CHAT_MODEL = "Qwen2.5-72B-Instruct"
+CHAT_MODEL = "Qwen3-32B"
 SYSTEM_PROMPT = "你是一名精确的法律信息提取助手，擅长从刑事案件描述中提取关键元素。"
 
 
@@ -48,117 +48,161 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
 
 
 def extract_metadata_with_llm(chunk, client):
-    """
-    使用LLM从案件文本中提取时间、地点、人物和被告人信息
-    """
-    user_prompt = f"""
-请从下面的案件描述中提取关键信息，并严格按照要求返回。
+    # 定义所有prompt模板
+    prompts = {
+        "dates": f"""
+你的任务是从案件描述片段中提取所有出现的日期。你的回答应为一个字符串，其中包含所有日期，用换行符分隔：
 
-案件描述如下：
+- 格式："YYYYMMDD\nYYYYMM\nYYYY"
+- 示例："20190101\n20191231\n202001"
 
-<案件描述>
+要求：
+
+- 同一日期出现多次的，只记录一次
+- 如果在案件描述片段中找不到任何一个具体的日期，请返回："<none>"
+- 不要提供推理过程，直接给出最终结果
+
+案件描述片段如下：
+
+<案件描述片段>
 {chunk}
-</案件描述>
-""" + """
-提取项的详细说明如下：
+</案件描述片段>
+""",
+        "locations": f"""
+你的任务是从案件描述片段中提取所有出现的地点。你的回答应为一个字符串，其中包含所有地点，用换行符分隔：
 
-1. date（日期）：
-   - 提取案件中出现的所有明确日期。
-   - 如有可能，精确到"日"级别，否则精确到"月"级别。
-   - 舍弃比"日"更精确的时间粒度，如时、分、秒、下午、晚上、左右。
-   - 格式示例：["2014年2月20日", "2015年12月29日"]。
+- 格式："地点1\n地点2\n地点3"
+- 示例："杭州市淳安县千岛湖镇新安东路\n达州市通川区\n博罗县下河村"
 
-2. location（地点）：
-   - 提取案件中提及的所有地点。
-   - 提取层级要求如下：
-     - 如有可能，保留至街道名、镇名、村名，否则保留至县名、区名或市名；
-     - 严格禁止提取更具体的地标，如：门牌号、楼栋号、单位/企业名称（如工厂、超市、学校）、楼层信息、房间号等；
-     - 举例说明：
-       - 错误示例："南通市通州区五接镇江苏某某船舶重工有限公司1号宿舍楼"
-       - 正确示例："南通市通州区五接镇"
-       - 错误示例："杭州市淳安县千岛湖镇新安东路1120号美美食品商行"
-       - 正确示例："杭州市淳安县千岛湖镇新安东路"
-       - 错误示例："广州市南沙区大岗镇人民路宇航网吧门口"
-       - 正确示例："广州市南沙区大岗镇人民路"
-   - 如果地点信息中含有企业名、门牌号、楼号、具体设施名称，请舍弃这些内容，仅保留上级行政地名或街道/村级地名。
-   - 格式示例：["杭州市淳安县千岛湖镇新安东路", "达州市通川区", "博罗县下河村", "桥东岸路"]。
+要求：
 
-3. people（人物）：
-   - 提取所有在案件中出现的人物信息。
-   - 尽可能提取：
-     - 姓名（如有）；
-     - 职业（如有，如店主、店员、公交司机等）。
-     - 在当次案件中扮演的角色（如有，如被告人、被害人、同伙、公安民警等），注意这里不是人物的职业；
-   - 如果某项信息缺失，请用空字符串""占位。
-   - 格式示例：
-     [
-       {"name": "唐某", "role": "被告人", "occupation": ""},
-       {"name": "卢某某", "role": "被害人", "occupation": "店主"}
-       {"name": "", "role": "", "occupation": "店员"}
-     ]
+— 提供尽量完整的地址，如有可能，精确到道路名、街道名、镇名、村名
+- 禁止提取更具体的地标，如：门牌号、楼栋号、单位/企业名称（如工厂、超市、学校）、楼层信息、房间号等
+- 如果在案件描述片段中找不到任何一个具体的地点，请返回："<none>"
+- 不要提供推理过程，直接给出最终结果
 
-4. defendant（被告人）：
-   - 提取案件中的被告人姓名。
-   - 仅填写姓名，不添加"被告""被告人"等前缀。
-   - 示例： "唐某"
+案件描述片段如下：
 
-请严格按照以下 JSON 格式返回提取结果（不要有任何其他文字解释）：
+<案件描述片段>
+{chunk}
+</案件描述片段>
+""",
+        "people": f"""
+你的任务是从案件描述片段中提取所有出现的人物（自然人）。你的回答应为一个字符串，其中包含所有人物的姓名、职业和在当次审判中的角色，人物之间用换行符分隔，姓名、职业、角色之间用半角分号分隔：
 
-```json
-{
-  "date": ["..."],
-  "location": ["..."],
-  "people": [
-    {"name": "...", "role": "...", "occupation": "..."}
-  ],
-  "defendant": "..."
-}
+- 格式："人物1;职业1;角色1\n人物2;职业2;角色2\n人物3;职业3;角色3"
+- 示例："秦成然;幼儿园董事长;上诉人法定代表人\n苏利强;律师;原告委托诉讼代理人\n郭恒军;法官;审判长\n顾春;村委会主任;被上诉人法定代表人"
+
+要求：
+
+- 提取的人物必须是自然人，而不能是法人（公司企业、事业单位、政府部门等）
+- 如果某项信息缺失，请用 "<unk>" 占位
+- 如果在案件描述片段中找不到任何一个具体的人物，请直接返回："<none>"
+- 不要提供推理过程，直接给出最终结果
+
+案件描述片段如下：
+
+<案件描述片段>
+{chunk}
+</案件描述片段>
+""",
+        "numbers": f"""
+你的任务是从案件描述片段中提取所有出现的数额。你的回答应为一个字符串，其中包含所有数额，用换行符分隔：
+
+- 格式："数额1\n数额2\n数额3"
+- 示例："168000元\n16.8万元\n98.95平方米"
+
+要求：
+
+- 保留万、亿等数量单位
+- 保留元、米、平方米等度量单位
+- 不保留千位分隔符
+- 如果在案件描述片段中找不到任何一个具体的数额，请直接返回："<none>"
+- 不要提供推理过程，直接给出最终结果
+
+案件描述片段如下：
+
+<案件描述片段>
+{chunk}
+</案件描述片段>
+""",
+        "defendants": f"""
+你的任务是从案件描述片段中提取所有被告人。你的回答应为一个字符串，其中包含所有被告人的姓名，用换行符分隔：
+
+- 格式："被告人姓名1\n被告人姓名2\n被告人姓名3"
+- 示例1："王某甲"
+- 示例2："胡某\n谢某"
+
+要求：
+
+- 不添加"被告"、"被告人"等前缀
+- 如果在案件描述片段中找不到任何一个被告人，请直接返回："<none>"
+- 不要提供推理过程，直接给出最终结果
+
+案件描述片段如下：
+
+<案件描述片段>
+{chunk}
+</案件描述片段>
 """
-
-    response = client.chat.completions.create(
-        model=CHAT_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-            {
-                "role": "user",
-                "content": user_prompt
-            },
-        ],
-    )
-
-    # 提取JSON部分
-    response_text = response.choices[0].message.content
-    json_start = response_text.find(
-        "```json") + 7 if "```json" in response_text else response_text.find(
-            "{")
-    json_end = response_text.rfind("}") + 1
-    json_str = response_text[json_start:json_end].strip()
-
-    # 解析JSON
-    extracted_data = json.loads(json_str)
-    people = extracted_data["people"]
-    if people:
-        people = {
-            "names": [p["name"] for p in people],
-            "roles": [p["role"] for p in people],
-            "occupations": [p["occupation"] for p in people]
-        }
-    else:
-        people = {
-            "names": ["<unknown>"],
-            "roles": ["<unknown>"],
-            "occupations": ["<unknown>"]
-        }
-
-    return {
-        "date": extracted_data.get("date", ["<unknown>"]),
-        "location": extracted_data.get("location", ["<unknown>"]),
-        "people": people,
-        "defendant": extracted_data.get("defendant", "<unknown>")
     }
+
+    def extract_single_type(prompt_data):
+        field_name, prompt = prompt_data
+        max_retries = 4  # 总共5次尝试（初始1次 + 重试4次）
+        for attempt in range(max_retries + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=CHAT_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": SYSTEM_PROMPT
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        },
+                    ],
+                    extra_body={
+                        "chat_template_kwargs": {
+                            "enable_thinking": False
+                        },
+                    },
+                    temperature=0.0)
+                data = response.choices[0].message.content.strip()
+
+                if len(data) > 100:
+                    data = data.split("：\n")[-1].split("\n\n")[-1]
+
+                return field_name, data
+            except Exception as e:
+                if attempt < max_retries:
+                    # 不是最后一次尝试，等待后重试
+                    wait_time = (attempt + 1) * 2  # 递增等待时间：2s, 4s
+                    print(
+                        f"Attempt {attempt + 1} failed for {field_name}, retrying in {wait_time}s..."
+                    )
+                    import time
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    # 最后一次尝试失败，打印错误并返回默认值
+                    print(
+                        f"Error requesting LLM for {field_name} after {max_retries + 1} attempts: {e}"
+                    )
+                    return field_name, "<none>"
+
+    # 并行执行所有5个LLM调用
+    results = {}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(extract_single_type, item): item for item in prompts.items()}
+        
+        for future in as_completed(futures):
+            field_name, data = future.result()
+            results[field_name] = data
+
+    return results
 
 
 def setup_milvus_collection(dense_dim):
@@ -199,17 +243,9 @@ def setup_milvus_collection(dense_dim):
                     dtype=DataType.ARRAY,
                     element_type=DataType.INT64,
                     max_capacity=9),
-        FieldSchema(name="accusation",
-                    dtype=DataType.ARRAY,
-                    element_type=DataType.VARCHAR,
-                    max_length=100,
-                    max_capacity=13),
+        FieldSchema(name="accusation", dtype=DataType.VARCHAR, max_length=300),
         FieldSchema(name="punish_of_money", dtype=DataType.INT64),
-        FieldSchema(name="criminals",
-                    dtype=DataType.ARRAY,
-                    element_type=DataType.VARCHAR,
-                    max_length=10,
-                    max_capacity=30),
+        FieldSchema(name="criminals", dtype=DataType.VARCHAR, max_length=100),
         FieldSchema(name="imprisonment", dtype=DataType.INT64),
         FieldSchema(name="life_imprisonment", dtype=DataType.BOOL),
         FieldSchema(name="death_penalty", dtype=DataType.BOOL),
@@ -226,20 +262,16 @@ def setup_milvus_collection(dense_dim):
                         max_length=36))
     if IS_LLM_EXTRACT:
         fields.extend([
-            FieldSchema(name="dates",
-                        dtype=DataType.ARRAY,
-                        element_type=DataType.VARCHAR,
-                        max_length=30,
-                        max_capacity=20),
+            FieldSchema(name="dates", dtype=DataType.VARCHAR, max_length=300),
             FieldSchema(name="locations",
-                        dtype=DataType.ARRAY,
-                        element_type=DataType.VARCHAR,
-                        max_length=100,
-                        max_capacity=20),
-            FieldSchema(name="people", dtype=DataType.JSON),
-            FieldSchema(name="defendant",
                         dtype=DataType.VARCHAR,
-                        max_length=10)
+                        max_length=300),
+            FieldSchema(name="people", dtype=DataType.VARCHAR, max_length=300),
+            FieldSchema(name="numbers", dtype=DataType.VARCHAR,
+                        max_length=500),
+            FieldSchema(name="defendants",
+                        dtype=DataType.VARCHAR,
+                        max_length=100)
         ])
     schema = CollectionSchema(fields)
     if utility.has_collection(COLLECTION_NAME):
@@ -267,6 +299,18 @@ def record_generator(jsonl_path):
         meta = item["meta"]
         fact_id = str(uuid.uuid4())
 
+        metadata = {
+            "relevant_articles":
+            [int(i) for i in set(meta["relevant_articles"])],
+            "accusation": "\n".join(meta["accusation"]),
+            "punish_of_money": meta["punish_of_money"],
+            "criminals": "\n".join(meta["criminals"]),
+            "imprisonment": meta["term_of_imprisonment"]["imprisonment"],
+            "life_imprisonment":
+            meta["term_of_imprisonment"]["life_imprisonment"],
+            "death_penalty": meta["term_of_imprisonment"]["death_penalty"]
+        }
+
         if IS_PARENT_CHILD:
             parent_chunks = chunk_text(
                 fact, PARENT_CHUNK_SIZE, PARENT_CHUNK_OVERLAP) if len(
@@ -278,7 +322,8 @@ def record_generator(jsonl_path):
                 yield {
                     "parent_id": parent_id,
                     "fact_id": fact_id,
-                    "chunk": parent_chunk
+                    "chunk": parent_chunk,
+                    "is_parent": True
                 }
 
                 chunks = chunk_text(
@@ -287,23 +332,6 @@ def record_generator(jsonl_path):
                 for chunk in chunks:
                     if len(chunk) <= 3:
                         continue
-
-                    metadata = {
-                        "relevant_articles":
-                        [int(i) for i in set(meta["relevant_articles"])],
-                        "accusation":
-                        meta["accusation"],
-                        "punish_of_money":
-                        meta["punish_of_money"],
-                        "criminals":
-                        meta["criminals"],
-                        "imprisonment":
-                        meta["term_of_imprisonment"]["imprisonment"],
-                        "life_imprisonment":
-                        meta["term_of_imprisonment"]["life_imprisonment"],
-                        "death_penalty":
-                        meta["term_of_imprisonment"]["death_penalty"]
-                    }
 
                     yield {
                         "chunk_id": str(uuid.uuid4()),
@@ -318,23 +346,6 @@ def record_generator(jsonl_path):
             for chunk in chunks:
                 if len(chunk) <= 3:
                     continue
-
-                metadata = {
-                    "relevant_articles":
-                    [int(i) for i in set(meta["relevant_articles"])],
-                    "accusation":
-                    meta["accusation"],
-                    "punish_of_money":
-                    meta["punish_of_money"],
-                    "criminals":
-                    meta["criminals"],
-                    "imprisonment":
-                    meta["term_of_imprisonment"]["imprisonment"],
-                    "life_imprisonment":
-                    meta["term_of_imprisonment"]["life_imprisonment"],
-                    "death_penalty":
-                    meta["term_of_imprisonment"]["death_penalty"]
-                }
 
                 yield {
                     "chunk_id": str(uuid.uuid4()),
@@ -359,84 +370,87 @@ def process_llm_metadata_parallel(records, llm_client, max_workers=4):
 
     def process_single_record(record):
         chunk = record["chunk"]
-        chunk_id = record.get('chunk_id', 'unknown')
-        max_retries = 2  # 总共3次尝试（初始1次 + 重试2次）
+        extracted_metadata = extract_metadata_with_llm(chunk, llm_client)
+        record.update(extracted_metadata)
+        return record
 
-        for attempt in range(max_retries + 1):
-            try:
-                extracted_metadata = extract_metadata_with_llm(
-                    chunk, llm_client)
-                record.update(extracted_metadata)
-                return record
-            except Exception as e:
-                if attempt < max_retries:
-                    # 不是最后一次尝试，等待后重试
-                    wait_time = (attempt + 1) * 2  # 递增等待时间：2s, 4s
-                    print(
-                        f"Chunk {chunk_id}: Attempt {attempt + 1} failed, retrying in {wait_time}s..."
-                    )
-                    import time
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    # 最后一次尝试失败，打印错误并返回默认值
-                    print(
-                        f"Error processing chunk {chunk_id} after {max_retries + 1} attempts: {e}"
-                    )
-                    # 返回带有默认值的记录
-                    record.update({
-                        "dates": ["<unknown>"],
-                        "locations": ["<unknown>"],
-                        "people": {
-                            "names": ["<unknown>"],
-                            "roles": ["<unknown>"],
-                            "occupations": ["<unknown>"]
-                        },
-                        "defendant": "<unknown>"
-                    })
-                    return record
+    # 分离parent和非parent记录
+    parent_records = [r for r in records if r.get("is_parent", False)]
+    non_parent_records = [r for r in records if not r.get("is_parent", False)]
 
-    # 使用线程池并行处理非parent记录
-    processed_records = []
+    # 如果没有非parent记录需要处理，直接返回原记录
+    if not non_parent_records:
+        return records
+
+    # 并行处理非parent记录 - 使用map更简洁
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_record = {
-            executor.submit(process_single_record, record): record
-            for record in records
-        }
+        processed_non_parent = list(
+            executor.map(process_single_record, non_parent_records))
 
-        for future in as_completed(future_to_record):
-            try:
-                processed_record = future.result()
-                processed_records.append(processed_record)
-            except Exception as e:
-                original_record = future_to_record[future]
-                print(
-                    f"Failed to process record {original_record.get('chunk_id', 'unknown')}: {e}"
-                )
-                # 使用原记录加默认值
-                original_record.update({
-                    "dates": ["<unknown>"],
-                    "locations": ["<unknown>"],
-                    "people": {
-                        "names": ["<unknown>"],
-                        "roles": ["<unknown>"],
-                        "occupations": ["<unknown>"]
-                    },
-                    "defendant": "<unknown>"
-                })
-                processed_records.append(original_record)
+    # 简单合并：parent记录 + 处理后的非parent记录
+    return parent_records + processed_non_parent
 
-    # 合并parent记录和处理后的记录，保持原顺序
-    all_records = []
-    non_parent_iter = iter(processed_records)
 
-    for record in records:
-        if record.get("is_parent", False):
-            all_records.append(record)
-        else:
-            all_records.append(next(non_parent_iter))
+def build_insert_data(buffer, embeddings, parent_col):
+    """
+    构建用于插入Milvus的数据数组
+    
+    Args:
+        buffer: 记录缓冲区
+        embeddings: 嵌入向量
+        parent_col: 父级集合（用于判断是否需要parent_id字段）
+    
+    Returns:
+        list: 准备插入的数据数组
+    """
+    to_insert = [
+        [r["chunk_id"] for r in buffer],
+        [r["fact_id"] for r in buffer],
+        [r["chunk"] for r in buffer],
+        [r["relevant_articles"] for r in buffer],
+        [r["accusation"] for r in buffer],
+        [r["punish_of_money"] for r in buffer],
+        [r["criminals"] for r in buffer],
+        [r["imprisonment"] for r in buffer],
+        [r["life_imprisonment"] for r in buffer],
+        [r["death_penalty"] for r in buffer],
+        embeddings["sparse"],
+        embeddings["dense"],
+    ]
+    if parent_col:
+        to_insert.insert(1, [r["parent_id"] for r in buffer])
+    if IS_LLM_EXTRACT:
+        to_insert.extend([
+            [r["dates"] for r in buffer],
+            [r["locations"] for r in buffer],
+            [r["people"] for r in buffer],
+            [r["numbers"] for r in buffer],
+            [r["defendants"] for r in buffer]
+        ])
+    return to_insert
 
-    return all_records
+
+def insert_parent_batch(parent_col, parent_buffer):
+    """
+    插入parent记录批次
+    
+    Args:
+        parent_col: parent集合
+        parent_buffer: parent记录缓冲区
+    
+    Returns:
+        int: 插入的记录数量
+    """
+    if not parent_buffer:
+        return 0
+        
+    parent_col.insert([
+        [r["parent_id"] for r in parent_buffer],  # parent_id
+        [r["fact_id"] for r in parent_buffer],  # fact_id
+        [r["chunk"] for r in parent_buffer],  # chunk
+        [[0.0, 0.0] for _ in parent_buffer]  # vector
+    ])
+    return len(parent_buffer)
 
 
 def insert_data_streaming(col,
@@ -454,13 +468,7 @@ def insert_data_streaming(col,
         if record.get("is_parent", False):
             parent_buffer.append(record)
             if len(parent_buffer) >= BATCH_SIZE:
-                parent_col.insert([
-                    [r["parent_id"] for r in parent_buffer],  # parent_id
-                    [r["fact_id"] for r in parent_buffer],  # fact_id
-                    [r["chunk"] for r in parent_buffer],  # chunk
-                    [[0.0, 0.0] for _ in parent_buffer]  # vector
-                ])
-                total_parent += len(parent_buffer)
+                total_parent += insert_parent_batch(parent_col, parent_buffer)
                 parent_buffer = []
         else:
             buffer.append(record)
@@ -475,27 +483,7 @@ def insert_data_streaming(col,
 
                 chunks = [r["chunk"] for r in buffer]
                 embeddings = ef(chunks)
-                to_insert = [
-                    [r["chunk_id"] for r in buffer],
-                    [r["fact_id"] for r in buffer],
-                    [r["chunk"] for r in buffer],
-                    [r["relevant_articles"] for r in buffer],
-                    [r["accusation"] for r in buffer],
-                    [r["punish_of_money"] for r in buffer],
-                    [r["criminals"] for r in buffer],
-                    [r["imprisonment"] for r in buffer],
-                    [r["life_imprisonment"] for r in buffer],
-                    [r["death_penalty"] for r in buffer],
-                    embeddings["sparse"],
-                    embeddings["dense"],
-                ]
-                if parent_col:
-                    to_insert.insert(1, [r["parent_id"] for r in buffer])
-                if IS_LLM_EXTRACT:
-                    to_insert.extend([[r["dates"] for r in buffer],
-                                      [r["locations"] for r in buffer],
-                                      [r["people"] for r in buffer],
-                                      [r["defendant"] for r in buffer]])
+                to_insert = build_insert_data(buffer, embeddings, parent_col)
                 col.insert(to_insert)
                 total += len(buffer)
                 buffer = []
@@ -511,38 +499,12 @@ def insert_data_streaming(col,
 
         chunks = [r["chunk"] for r in buffer]
         embeddings = ef(chunks)
-        to_insert = [
-            [r["chunk_id"] for r in buffer],
-            [r["fact_id"] for r in buffer],
-            [r["chunk"] for r in buffer],
-            [r["relevant_articles"] for r in buffer],
-            [r["accusation"] for r in buffer],
-            [r["punish_of_money"] for r in buffer],
-            [r["criminals"] for r in buffer],
-            [r["imprisonment"] for r in buffer],
-            [r["life_imprisonment"] for r in buffer],
-            [r["death_penalty"] for r in buffer],
-            embeddings["sparse"],
-            embeddings["dense"],
-        ]
-        if parent_col:
-            to_insert.insert(1, [r["parent_id"] for r in buffer])
-        if IS_LLM_EXTRACT:
-            to_insert.extend([[r["dates"] for r in buffer],
-                              [r["locations"] for r in buffer],
-                              [r["people"] for r in buffer],
-                              [r["defendant"] for r in buffer]])
+        to_insert = build_insert_data(buffer, embeddings, parent_col)
         col.insert(to_insert)
         total += len(buffer)
 
     if parent_buffer:
-        parent_col.insert([
-            [r["parent_id"] for r in parent_buffer],  # parent_id
-            [r["fact_id"] for r in parent_buffer],  # fact_id
-            [r["chunk"] for r in parent_buffer],  # chunk
-            [[0.0, 0.0] for _ in parent_buffer]  # vector
-        ])
-        total_parent += len(parent_buffer)
+        total_parent += insert_parent_batch(parent_col, parent_buffer)
 
     print(f"Inserted {total} records and {total_parent} parent records.")
 
@@ -556,7 +518,7 @@ def main():
     parser.add_argument('--use-gcu',
                         help='Use Enflame GCU for embedding',
                         action='store_true')
-    parser.add_argument('--parent_child',
+    parser.add_argument('--parent-child',
                         help='Use parent child',
                         action='store_true')
     parser.add_argument('--llm-extract',

@@ -1,10 +1,9 @@
 import argparse
 import os
-import json
 import uuid
 import re
-from tqdm import tqdm
 import pandas as pd
+from tqdm import tqdm
 from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 from pymilvus import (
     connections,
@@ -19,16 +18,16 @@ from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 配置
-MILVUS_URI = "http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
-PARENT_COLLECTION_NAME = "civil_cases_parent"
+MILVUS_URI = "http://app-milvus-xxxxxxxx.demo.svc.cluster.local:19530"
+PARENT_COLLECTION_NAME = "civil_case_parent"
 PARENT_CHUNK_SIZE = 4096
 PARENT_CHUNK_OVERLAP = 0
-COLLECTION_NAME = "civil_cases"
+COLLECTION_NAME = "civil_case"
 CHUNK_SIZE = 256
 CHUNK_OVERLAP = 32
-BATCH_SIZE = 1000
+BATCH_SIZE = 2000
 CHAT_BASE_URL = "http://app-vllm-enflame-xxxxxxxx.namespace.svc.cluster.local/v1"
-CHAT_MODEL = "Qwen2.5-72B-Instruct"
+CHAT_MODEL = "Qwen3-32B"
 SYSTEM_PROMPT = "你是一名精确的法律信息提取助手，擅长从裁判文书中提取关键元素。"
 
 
@@ -97,19 +96,6 @@ def parse_legal_basis(legal_text):
     return result
 
 
-# 解析当事人信息
-def parse_parties(parties_text):
-    if pd.isna(parties_text) or not parties_text:
-        return []
-
-    # 按分号分割当事人
-    parties = [
-        party.strip() for party in str(parties_text).split('；')
-        if party.strip()
-    ]
-    return parties
-
-
 # 将中文数字转换为阿拉伯数字
 def chinese_to_arabic(chinese_num):
     chinese_numerals = {
@@ -165,155 +151,160 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
 
 
 def extract_metadata_with_llm(chunk, client):
-    """
-    使用LLM从案件文本中提取时间、地点、人物和被告人信息
-    """
-    user_prompt = f"""
-请从下面的裁判文书片段中提取关键信息，并严格按照要求返回。
+    # 定义所有prompt模板
+    prompts = {
+        "dates": f"""
+你的任务是从裁判文书片段中提取所有出现的日期。你的回答应为一个字符串，其中包含所有日期，用换行符分隔：
+
+- 格式："YYYYMMDD\nYYYYMM\nYYYY"
+- 示例："20190101\n20191231\n202001"
+
+要求：
+
+- 同一日期出现多次的，只记录一次
+- 如果在裁判文书片段中找不到任何一个具体的日期，请返回："<none>"
+- 不要提供推理过程，直接给出最终结果
 
 裁判文书片段如下：
 
 <裁判文书片段>
 {chunk}
 </裁判文书片段>
-""" + """
-提取项的详细说明如下：
+""",
+        "locations": f"""
+你的任务是从裁判文书片段中提取所有出现的地点。你的回答应为一个字符串，其中包含所有地点，用换行符分隔：
 
-1. dates（日期）：
-   - 提取裁判文书片段中出现的所有明确日期。
-   - 如有可能，精确到"日"级别，否则精确到"月"或"季节"级别。
-   - 舍弃比"日"更精确的时间粒度，如时、分、秒、下午、晚上、左右。
-   - 格式示例：["2019年1月1日", "2019年1月", "2019年春季"]。
+- 格式："地点1\n地点2\n地点3"
+- 示例："杭州市淳安县千岛湖镇新安东路\n达州市通川区\n博罗县下河村"
 
-2. locations（地点）：
-   - 提取案件中提及的所有地点。
-   - 提取层级要求如下：
-     - 如有可能，保留至街道名、镇名、村名，否则保留至县名、区名或市名；
-     - 禁止提取更具体的地标，如：门牌号、楼栋号、单位/企业名称（如工厂、超市、学校）、楼层信息、房间号等；
-     - 举例说明：
-       - 错误示例："南通市通州区五接镇江苏某某船舶重工有限公司1号宿舍楼"
-       - 正确示例："南通市通州区五接镇"
-       - 错误示例："杭州市淳安县千岛湖镇新安东路1120号美美食品商行"
-       - 正确示例："杭州市淳安县千岛湖镇新安东路"
-       - 错误示例："广州市南沙区大岗镇人民路宇航网吧门口"
-       - 正确示例："广州市南沙区大岗镇人民路"
-   - 格式示例：["杭州市淳安县千岛湖镇新安东路", "达州市通川区", "博罗县下河村", "桥东岸路"]。
+要求：
 
-3. people（人物）：
-   - 提取所有在裁判文书片段中出现的人物（自然人）信息。
-   - 尽可能提取：
-     - 姓名（如有）；
-     - 职业（如有，如董事长、股东、公司职员、村委会主任、律师、法律工作者、法官等）。
-     - 在当次审判中扮演的角色（如有，如原告、原告负责人、原告法定代表人、原告委托诉讼代理人、被告、被告负责人、被告法定代表人、被告委托诉讼代理人、上诉人、上诉人法定代表人、被上诉人、被上诉人法定代表人等），注意这里不是人物的职业；
-   - 如果某项信息缺失，请用特殊字符串 "<unknown>" 占位。
-   - 注意提取的人物必须是自然人，而不能是法人（公司、事业单位、政府部门等）
-   - 格式示例：
-     [
-       {"name": "秦成然", "role": "上诉人法定代表人", "occupation": "幼儿园董事长"},
-       {"name": "苏利强", "role": "原告委托诉讼代理人", "occupation": "律师"},
-       {"name": "郭恒军", "role": "审判长", "occupation": "法官"},
-       {"name": "顾春", "role": "被上诉人法定代表人", "occupation": "村委会主任"}
-     ]
-    - 错误示例：
-     [
-       {"name": "长沙市建筑安装工程公司新疆分公司", "role": "上诉人", "occupation": "公司"}
-     ]
+— 提供尽量完整的地址，如有可能，精确到道路名、街道名、镇名、村名
+- 禁止提取更具体的地标，如：门牌号、楼栋号、单位/企业名称（如工厂、超市、学校）、楼层信息、房间号等
+- 如果在裁判文书片段中找不到任何一个具体的地点，请返回："<none>"
+- 不要提供推理过程，直接给出最终结果
 
-4. numbers（数额）：
-   - 提取裁判文书片段中出现的所有明确数额。
-   - 不提取编号、日期等的数字，不提取文件的数量或页码
-   - 允许保留万、亿等数量单位，允许保留元、米、平方米等衡量单位，不允许保留千位分隔符
-   - 格式示例：["168000元", "16.8万元", "98.95平方米"]。
+裁判文书片段如下：
 
-5. parties_llm（当事人）
-   - 提取裁判文书片段中出现的所有明确当事人信息。
-   - 注意上诉人即为原告，被上诉人即为被告。上诉人（或被上诉人）可能是原审原告，也可能是原审被告。
-   - 原告（或被告）可能是自然人，也可能是法人（公司、事业单位、政府部门等）。
-   - 如果某项信息缺失，请用特殊字符串 "<unknown>" 占位。
-   - 格式示例：
-    {
-      "plaintiff": ["北京西联东升石材有限公司"],
-      "defendant": ["北京盛宇兴业建筑装饰工程有限公司"],
-      "original_plaintiff": ["北京西联东升石材有限公司"],
-      "original_defendant": ["北京盛宇兴业建筑装饰工程有限公司"]
-    }
+<裁判文书片段>
+{chunk}
+</裁判文书片段>
+""",
+        "people": f"""
+你的任务是从裁判文书片段中提取所有出现的人物（自然人）。你的回答应为一个字符串，其中包含所有人物的姓名、职业和在当次审判中的角色，人物之间用换行符分隔，姓名、职业、角色之间用半角分号分隔：
 
+- 格式："人物1;职业1;角色1\n人物2;职业2;角色2\n人物3;职业3;角色3"
+- 示例："秦成然;幼儿园董事长;上诉人法定代表人\n苏利强;律师;原告委托诉讼代理人\n郭恒军;法官;审判长\n顾春;村委会主任;被上诉人法定代表人"
 
-请严格按照以下 JSON 格式返回提取结果（不要有任何其他文字解释）：
+要求：
 
-```json
-{
-  "dates": ["..."],
-  "locations": ["..."],
-  "people": [
-    {"name": "...", "role": "...", "occupation": "..."}
-  ],
-  "numbers": ["..."],
-  "parties_llm": {
-    "plaintiff": ["...", "..."],
-    "defendant": ["...", "..."],
-    "original_plaintiff": ["...", "..."],
-    "original_defendant": ["...", "..."]
-  }
-}
+- 提取的人物必须是自然人，而不能是法人（公司企业、事业单位、政府部门等）
+- 如果某项信息缺失，请用 "<unk>" 占位
+- 如果在裁判文书片段中找不到任何一个具体的人物，请直接返回："<none>"
+- 不要提供推理过程，直接给出最终结果
+
+裁判文书片段如下：
+
+<裁判文书片段>
+{chunk}
+</裁判文书片段>
+""",
+        "numbers": f"""
+你的任务是从裁判文书片段中提取所有出现的数额。你的回答应为一个字符串，其中包含所有数额，用换行符分隔：
+
+- 格式："数额1\n数额2\n数额3"
+- 示例："168000元\n16.8万元\n98.95平方米"
+
+要求：
+
+- 保留万、亿等数量单位
+- 保留元、米、平方米等度量单位
+- 不保留千位分隔符
+- 如果在裁判文书片段中找不到任何一个具体的数额，请直接返回："<none>"
+- 不要提供推理过程，直接给出最终结果
+
+裁判文书片段如下：
+
+<裁判文书片段>
+{chunk}
+</裁判文书片段>
+""",
+        "parties_llm": f"""
+你的任务是从裁判文书片段中提取所有出现的当事人。你的回答应为一个字符串，其中包含原告（上诉人）、被告（被上诉人）、原审原告、原审被告，用换行符分隔：
+
+- 格式："原告1\n被告1\n原审原告1\n原审被告1"
+- 示例："北京西联东升石材有限公司\n北京盛宇兴业建筑装饰工程有限公司\n北京西联东升石材有限公司\n北京盛宇兴业建筑装饰工程有限公司"
+
+要求：
+
+- 注意上诉人即为原告，被上诉人即为被告。上诉人（或被上诉人）可能是原审原告，也可能是原审被告
+- 注意原告（或被告）可能是自然人，也可能是法人（公司、事业单位、政府部门等）
+- 如果某项信息（如原审原告）缺失，请用 "<unk>" 占位
+- 如果在裁判文书片段中找不到任何一个当事人，请直接返回："<none>"
+- 不要提供推理过程，直接给出最终结果
+
+裁判文书片段如下：
+
+<裁判文书片段>
+{chunk}
+</裁判文书片段>
 """
-
-    response = client.chat.completions.create(
-        model=CHAT_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-            {
-                "role": "user",
-                "content": user_prompt
-            },
-        ],
-    )
-
-    # 提取JSON部分
-    response_text = response.choices[0].message.content
-    json_start = response_text.find(
-        "```json") + 7 if "```json" in response_text else response_text.find(
-            "{")
-    json_end = response_text.rfind("}") + 1
-    json_str = response_text[json_start:json_end].strip()
-
-    # 解析JSON
-    extracted_data = json.loads(json_str)
-    people = extracted_data["people"]
-    if people:
-        people = {
-            "names": [p["name"] for p in people],
-            "roles": [p["role"] for p in people],
-            "occupations": [p["occupation"] for p in people]
-        }
-    else:
-        people = {
-            "names": ["<unknown>"],
-            "roles": ["<unknown>"],
-            "occupations": ["<unknown>"]
-        }
-
-    return {
-        "dates":
-        extracted_data.get("dates", ["<unknown>"]),
-        "locations":
-        extracted_data.get("locations", ["<unknown>"]),
-        "people":
-        people,
-        "numbers":
-        extracted_data.get("numbers", ["<unknown>"]),
-        "parties_llm":
-        extracted_data.get(
-            "parties_llm", {
-                "plaintiff": ["<unknown>"],
-                "defendant": ["<unknown>"],
-                "original_plaintiff": ["<unknown>"],
-                "original_defendant": ["<unknown>"]
-            })
     }
+
+    def extract_single_type(prompt_data):
+        field_name, prompt = prompt_data
+        max_retries = 4  # 总共5次尝试（初始1次 + 重试4次）
+        for attempt in range(max_retries + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=CHAT_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": SYSTEM_PROMPT
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        },
+                    ],
+                    extra_body={
+                        "chat_template_kwargs": {"enable_thinking": False},
+                    },
+                    temperature=0.0)
+                data = response.choices[0].message.content.strip()
+                
+                if len(data) > 100:
+                    data = data.split("：\n")[-1].split("\n\n")[-1]
+                    
+                return field_name, data
+            except Exception as e:
+                if attempt < max_retries:
+                    # 不是最后一次尝试，等待后重试
+                    wait_time = (attempt + 1) * 2  # 递增等待时间：2s, 4s
+                    print(
+                        f"Attempt {attempt + 1} failed for {field_name}, retrying in {wait_time}s..."
+                    )
+                    import time
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    # 最后一次尝试失败，打印错误并返回默认值
+                    print(
+                        f"Error requesting LLM for {field_name} after {max_retries + 1} attempts: {e}"
+                    )
+                    return field_name, "<none>"
+
+    # 并行执行所有5个LLM调用
+    results = {}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(extract_single_type, item): item for item in prompts.items()}
+        
+        for future in as_completed(futures):
+            field_name, data = future.result()
+            results[field_name] = data
+
+    return results
 
 
 def setup_milvus_collection(dense_dim):
@@ -358,10 +349,8 @@ def setup_milvus_collection(dense_dim):
                     dtype=DataType.VARCHAR,
                     max_length=17),
         FieldSchema(name="parties",
-                    dtype=DataType.ARRAY,
-                    element_type=DataType.VARCHAR,
-                    max_length=100,
-                    max_capacity=100),
+                    dtype=DataType.VARCHAR,
+                    max_length=400),
         FieldSchema(name="case_cause", dtype=DataType.VARCHAR, max_length=100),
         FieldSchema(name="legal_basis", dtype=DataType.JSON),
         FieldSchema(name="sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -377,23 +366,16 @@ def setup_milvus_collection(dense_dim):
                         max_length=36))
     if IS_LLM_EXTRACT:
         fields.extend([
-            FieldSchema(name="dates",
-                        dtype=DataType.ARRAY,
-                        element_type=DataType.VARCHAR,
-                        max_length=40,
-                        max_capacity=20),
+            FieldSchema(name="dates", dtype=DataType.VARCHAR, max_length=700),
             FieldSchema(name="locations",
-                        dtype=DataType.ARRAY,
-                        element_type=DataType.VARCHAR,
-                        max_length=150,
-                        max_capacity=20),
-            FieldSchema(name="people", dtype=DataType.JSON),
-            FieldSchema(name="numbers",
-                        dtype=DataType.ARRAY,
-                        element_type=DataType.VARCHAR,
-                        max_length=40,
-                        max_capacity=20),
-            FieldSchema(name="parties_llm", dtype=DataType.JSON)
+                        dtype=DataType.VARCHAR,
+                        max_length=500),
+            FieldSchema(name="people", dtype=DataType.VARCHAR, max_length=900),
+            FieldSchema(name="numbers", dtype=DataType.VARCHAR,
+                        max_length=500),
+            FieldSchema(name="parties_llm",
+                        dtype=DataType.VARCHAR,
+                        max_length=600)
         ])
     schema = CollectionSchema(fields)
     if utility.has_collection(COLLECTION_NAME):
@@ -432,7 +414,7 @@ def record_generator(csv_path, chunksize):
 
         def get_metadata(key):
             if pd.isna(item[key]):
-                return "<unknown>"
+                return "<unk>"
             value = item[key]
             if "；" in value:
                 return value.split("；")[0]
@@ -445,7 +427,7 @@ def record_generator(csv_path, chunksize):
         court = item["法院"]
         region = get_metadata("所属地区")
         judgment_date = "{}年{}月{}日".format(*map(int, item["裁判日期"].split("-")))
-        parties = parse_parties(item["当事人"])
+        parties = item["当事人"].replace("；", "\n")
         case_cause = get_metadata("案由")
         legal_basis = parse_legal_basis(item["法律依据"])
 
@@ -520,91 +502,87 @@ def process_llm_metadata_parallel(records, llm_client, max_workers=4):
 
     def process_single_record(record):
         chunk = record["chunk"]
-        chunk_id = record.get('chunk_id', 'unknown')
-        max_retries = 4  # 总共5次尝试（初始1次 + 重试4次）
-        
-        for attempt in range(max_retries + 1):
-            try:
-                extracted_metadata = extract_metadata_with_llm(chunk, llm_client)
-                record.update(extracted_metadata)
-                return record
-            except Exception as e:
-                if attempt < max_retries:
-                    # 不是最后一次尝试，等待后重试
-                    wait_time = (attempt + 1) * 2  # 递增等待时间：2s, 4s
-                    print(f"Chunk {chunk_id}: Attempt {attempt + 1} failed, retrying in {wait_time}s...")
-                    import time
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    # 最后一次尝试失败，打印错误并返回默认值
-                    print(f"Error processing chunk {chunk_id} after {max_retries + 1} attempts: {e}")
-                    # 返回带有默认值的记录
-                    record.update({
-                        "dates": ["<unknown>"],
-                        "locations": ["<unknown>"],
-                        "people": {
-                            "names": ["<unknown>"],
-                            "roles": ["<unknown>"],
-                            "occupations": ["<unknown>"]
-                        },
-                        "numbers": ["<unknown>"],
-                        "parties_llm": {
-                            "plaintiff": ["<unknown>"],
-                            "defendant": ["<unknown>"],
-                            "original_plaintiff": ["<unknown>"],
-                            "original_defendant": ["<unknown>"]
-                        }
-                    })
-                    return record
+        extracted_metadata = extract_metadata_with_llm(chunk, llm_client)
+        record.update(extracted_metadata)
+        return record
 
-    # 使用线程池并行处理非parent记录
-    processed_records = []
+    # 分离parent和非parent记录
+    parent_records = [r for r in records if r.get("is_parent", False)]
+    non_parent_records = [r for r in records if not r.get("is_parent", False)]
+    
+    # 如果没有非parent记录需要处理，直接返回原记录
+    if not non_parent_records:
+        return records
+    
+    # 并行处理非parent记录 - 使用map更简洁
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_record = {
-            executor.submit(process_single_record, record): record
-            for record in records
-        }
+        processed_non_parent = list(executor.map(process_single_record, non_parent_records))
+    
+    # 简单合并：parent记录 + 处理后的非parent记录
+    return parent_records + processed_non_parent
 
-        for future in as_completed(future_to_record):
-            try:
-                processed_record = future.result()
-                processed_records.append(processed_record)
-            except Exception as e:
-                original_record = future_to_record[future]
-                print(
-                    f"Failed to process record {original_record.get('chunk_id', 'unknown')}: {e}"
-                )
-                # 使用原记录加默认值
-                original_record.update({
-                    "dates": ["<unknown>"],
-                    "locations": ["<unknown>"],
-                    "people": {
-                        "names": ["<unknown>"],
-                        "roles": ["<unknown>"],
-                        "occupations": ["<unknown>"]
-                    },
-                    "numbers": ["<unknown>"],
-                    "parties_llm": {
-                        "plaintiff": ["<unknown>"],
-                        "defendant": ["<unknown>"],
-                        "original_plaintiff": ["<unknown>"],
-                        "original_defendant": ["<unknown>"]
-                    }
-                })
-                processed_records.append(original_record)
 
-    # 合并parent记录和处理后的记录，保持原顺序
-    all_records = []
-    non_parent_iter = iter(processed_records)
+def build_insert_data(buffer, embeddings, parent_col):
+    """
+    构建用于插入Milvus的数据数组
+    
+    Args:
+        buffer: 记录缓冲区
+        embeddings: 嵌入向量
+        parent_col: 父级集合（用于判断是否需要parent_id字段）
+    
+    Returns:
+        list: 准备插入的数据数组
+    """
+    to_insert = [
+        [r["chunk_id"] for r in buffer],
+        [r["case_id"] for r in buffer],
+        [r["chunk"] for r in buffer],
+        [r["case_number"] for r in buffer],
+        [r["case_name"] for r in buffer],
+        [r["court"] for r in buffer],
+        [r["region"] for r in buffer],
+        [r["judgment_date"] for r in buffer],
+        [r["parties"] for r in buffer],
+        [r["case_cause"] for r in buffer],
+        [r["legal_basis"] for r in buffer],
+        embeddings["sparse"],
+        embeddings["dense"],
+    ]
+    if parent_col:
+        to_insert.insert(1, [r["parent_id"] for r in buffer])
+    if IS_LLM_EXTRACT:
+        to_insert.extend([
+            [r["dates"] for r in buffer],
+            [r["locations"] for r in buffer],
+            [r["people"] for r in buffer],
+            [r["numbers"] for r in buffer],
+            [r["parties_llm"] for r in buffer]
+        ])
+    return to_insert
 
-    for record in records:
-        if record.get("is_parent", False):
-            all_records.append(record)
-        else:
-            all_records.append(next(non_parent_iter))
 
-    return all_records
+def insert_parent_batch(parent_col, parent_buffer):
+    """
+    插入parent记录批次
+    
+    Args:
+        parent_col: parent集合
+        parent_buffer: parent记录缓冲区
+    
+    Returns:
+        int: 插入的记录数量
+    """
+    if not parent_buffer:
+        return 0
+        
+    parent_col.insert([
+        [r["parent_id"] for r in parent_buffer],  # parent_id
+        [r["case_id"] for r in parent_buffer],  # case_id
+        [r["chunk"] for r in parent_buffer],  # chunk
+        [[0.0, 0.0] for _ in parent_buffer]  # vector
+    ])
+    return len(parent_buffer)
 
 
 def insert_data_streaming(col,
@@ -622,13 +600,7 @@ def insert_data_streaming(col,
         if record.get("is_parent", False):
             parent_buffer.append(record)
             if len(parent_buffer) >= BATCH_SIZE:
-                parent_col.insert([
-                    [r["parent_id"] for r in parent_buffer],  # parent_id
-                    [r["case_id"] for r in parent_buffer],  # case_id
-                    [r["chunk"] for r in parent_buffer],  # chunk
-                    [[0.0, 0.0] for _ in parent_buffer]  # vector
-                ])
-                total_parent += len(parent_buffer)
+                total_parent += insert_parent_batch(parent_col, parent_buffer)
                 parent_buffer = []
         else:
             buffer.append(record)
@@ -643,29 +615,7 @@ def insert_data_streaming(col,
 
                 chunks = [r["chunk"] for r in buffer]
                 embeddings = ef(chunks)
-                to_insert = [
-                    [r["chunk_id"] for r in buffer],
-                    [r["case_id"] for r in buffer],
-                    [r["chunk"] for r in buffer],
-                    [r["case_number"] for r in buffer],
-                    [r["case_name"] for r in buffer],
-                    [r["court"] for r in buffer],
-                    [r["region"] for r in buffer],
-                    [r["judgment_date"] for r in buffer],
-                    [r["parties"] for r in buffer],
-                    [r["case_cause"] for r in buffer],
-                    [r["legal_basis"] for r in buffer],
-                    embeddings["sparse"],
-                    embeddings["dense"],
-                ]
-                if parent_col:
-                    to_insert.insert(1, [r["parent_id"] for r in buffer])
-                if IS_LLM_EXTRACT:
-                    to_insert.extend([[r["dates"] for r in buffer],
-                                      [r["locations"] for r in buffer],
-                                      [r["people"] for r in buffer],
-                                      [r["numbers"] for r in buffer],
-                                      [r["parties_llm"] for r in buffer]])
+                to_insert = build_insert_data(buffer, embeddings, parent_col)
                 col.insert(to_insert)
                 total += len(buffer)
                 buffer = []
@@ -682,40 +632,12 @@ def insert_data_streaming(col,
 
         chunks = [r["chunk"] for r in buffer]
         embeddings = ef(chunks)
-        to_insert = [
-            [r["chunk_id"] for r in buffer],
-            [r["case_id"] for r in buffer],
-            [r["chunk"] for r in buffer],
-            [r["case_number"] for r in buffer],
-            [r["case_name"] for r in buffer],
-            [r["court"] for r in buffer],
-            [r["region"] for r in buffer],
-            [r["judgment_date"] for r in buffer],
-            [r["parties"] for r in buffer],
-            [r["case_cause"] for r in buffer],
-            [r["legal_basis"] for r in buffer],
-            embeddings["sparse"],
-            embeddings["dense"],
-        ]
-        if parent_col:
-            to_insert.insert(1, [r["parent_id"] for r in buffer])
-        if IS_LLM_EXTRACT:
-            to_insert.extend([[r["dates"] for r in buffer],
-                              [r["locations"] for r in buffer],
-                              [r["people"] for r in buffer],
-                              [r["numbers"] for r in buffer],
-                              [r["parties_llm"] for r in buffer]])
+        to_insert = build_insert_data(buffer, embeddings, parent_col)
         col.insert(to_insert)
         total += len(buffer)
 
     if parent_buffer:
-        parent_col.insert([
-            [r["parent_id"] for r in parent_buffer],  # parent_id
-            [r["case_id"] for r in parent_buffer],  # case_id
-            [r["chunk"] for r in parent_buffer],  # chunk
-            [[0.0, 0.0] for _ in parent_buffer]  # vector
-        ])
-        total_parent += len(parent_buffer)
+        total_parent += insert_parent_batch(parent_col, parent_buffer)
 
     print(f"Inserted {total} records and {total_parent} parent records.")
 
@@ -791,8 +713,9 @@ def main():
         print(f"Processing file: {csv_path}")
         if IS_LLM_EXTRACT:
             print(f"Using {args.llm_workers} workers for LLM processing")
-        insert_data_streaming(col, parent_col, record_generator(csv_path, args.csv_chunksize), ef,
-                              llm_client, args.llm_workers)
+        insert_data_streaming(col, parent_col,
+                              record_generator(csv_path, args.csv_chunksize),
+                              ef, llm_client, args.llm_workers)
 
     print("All files processed successfully")
 
