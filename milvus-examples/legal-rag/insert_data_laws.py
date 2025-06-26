@@ -14,11 +14,14 @@ from pymilvus import (
 )
 from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter
+from openai import OpenAI
 
 # 配置
-MILVUS_URI = "http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
-COLLECTION_NAME = "criminal_law"  # "civil_code"
-BATCH_SIZE = 50
+MILVUS_URI = "http://app-milvus-xxxxxxxx.demo.svc.cluster.local:19530"
+COLLECTION_NAME = "civil_code"  # "civil_code"
+BATCH_SIZE = 100
+EMBEDDING_BASE_URL = "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
+EMBEDDING_MODEL = "Qwen3-Embedding-0.6B"
 
 
 # 读取 markdown 文件
@@ -171,6 +174,13 @@ def chunk_text(text):
     return chunks
 
 
+def embed_with_embedding_model(chunks):
+    client = OpenAI(base_url=EMBEDDING_BASE_URL, api_key="dummy")
+    response = client.embeddings.create(input=chunks, model=EMBEDDING_MODEL)
+    
+    return [data.embedding for data in response.data]
+
+
 def setup_milvus_collection(dense_dim):
     connections.connect(uri=MILVUS_URI, token="root:Milvus")
     fields = [
@@ -231,47 +241,44 @@ def record_generator(md_path):
         yield {"chunk_id": str(uuid.uuid4()), "chunk": chunk, **metadata}
 
 
+def insert_batch(col, buffer, ef):
+    """插入一批数据到Milvus集合中"""
+    if not buffer:
+        return 0
+
+    chunks = [r["chunk"] for r in buffer]
+    sparse_embeddings = ef(chunks)["sparse"]
+    dense_embeddings = embed_with_embedding_model(chunks)
+    
+    to_insert = [
+        [r["chunk_id"] for r in buffer],
+        [r["chunk"] for r in buffer],
+        [r["law"] for r in buffer],
+        [r["part"] for r in buffer],
+        [r["chapter"] for r in buffer],
+        [r["section"] for r in buffer],
+        [r["article"] for r in buffer],
+        [r["article_amended"] for r in buffer],
+        sparse_embeddings,
+        dense_embeddings,
+    ]
+    col.insert(to_insert)
+    return len(buffer)
+
+
 def insert_data_streaming(col, record_iter, ef, batch_size=BATCH_SIZE):
     buffer = []
     total = 0
+
     for record in tqdm(record_iter, desc="Inserting records"):
         buffer.append(record)
         if len(buffer) >= batch_size:
-            chunks = [r["chunk"] for r in buffer]
-            embeddings = ef(chunks)
-            to_insert = [
-                [r["chunk_id"] for r in buffer],
-                [r["chunk"] for r in buffer],
-                [r["law"] for r in buffer],
-                [r["part"] for r in buffer],
-                [r["chapter"] for r in buffer],
-                [r["section"] for r in buffer],
-                [r["article"] for r in buffer],
-                [r["article_amended"] for r in buffer],
-                embeddings["sparse"],
-                embeddings["dense"],
-            ]
-            col.insert(to_insert)
-            total += len(buffer)
+            total += insert_batch(col, buffer, ef)
             buffer = []
     # 插入剩余部分
     if buffer:
-        chunks = [r["chunk"] for r in buffer]
-        embeddings = ef(chunks)
-        to_insert = [
-            [r["chunk_id"] for r in buffer],
-            [r["chunk"] for r in buffer],
-            [r["law"] for r in buffer],
-            [r["part"] for r in buffer],
-            [r["chapter"] for r in buffer],
-            [r["section"] for r in buffer],
-            [r["article"] for r in buffer],
-            [r["article_amended"] for r in buffer],
-            embeddings["sparse"],
-            embeddings["dense"],
-        ]
-        col.insert(to_insert)
-        total += len(buffer)
+        total += insert_batch(col, buffer, ef)
+
     print(f"Inserted {total} records.")
 
 
@@ -294,7 +301,7 @@ def main():
         # 如果是目录，递归处理目录及子目录下所有的md文件
         for root, _, files in os.walk(path):
             for file in files:
-                if file.endswith('.md'):
+                if file.endswith('.md') and "法" in file:
                     md_files.append(os.path.join(root, file))
 
         if not md_files:

@@ -2,6 +2,7 @@ import argparse
 import os
 import json
 import uuid
+import re
 from tqdm import tqdm
 from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 from pymilvus import (
@@ -17,15 +18,17 @@ from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 配置
-MILVUS_URI = "http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
+MILVUS_URI = "http://app-milvus-xxxxxxxx.demo.svc.cluster.local:19530"
 PARENT_COLLECTION_NAME = "criminal_case_parent"
 PARENT_CHUNK_SIZE = 4096
 PARENT_CHUNK_OVERLAP = 0
 COLLECTION_NAME = "criminal_case"
 CHUNK_SIZE = 256
 CHUNK_OVERLAP = 32
-BATCH_SIZE = 1000
-CHAT_BASE_URL = "http://app-vllm-enflame-xxxxxxxx.namespace.svc.cluster.local/v1"
+BATCH_SIZE = 2000
+EMBEDDING_BASE_URL = "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
+EMBEDDING_MODEL = "Qwen3-Embedding-0.6B"
+CHAT_BASE_URL = "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
 CHAT_MODEL = "Qwen3-32B"
 SYSTEM_PROMPT = "你是一名精确的法律信息提取助手，擅长从刑事案件描述中提取关键元素。"
 
@@ -50,7 +53,8 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
 def extract_metadata_with_llm(chunk, client):
     # 定义所有prompt模板
     prompts = {
-        "dates": f"""
+        "dates":
+        f"""
 你的任务是从案件描述片段中提取所有出现的日期。你的回答应为一个字符串，其中包含所有日期，用换行符分隔：
 
 - 格式："YYYYMMDD\nYYYYMM\nYYYY"
@@ -68,7 +72,8 @@ def extract_metadata_with_llm(chunk, client):
 {chunk}
 </案件描述片段>
 """,
-        "locations": f"""
+        "locations":
+        f"""
 你的任务是从案件描述片段中提取所有出现的地点。你的回答应为一个字符串，其中包含所有地点，用换行符分隔：
 
 - 格式："地点1\n地点2\n地点3"
@@ -87,7 +92,8 @@ def extract_metadata_with_llm(chunk, client):
 {chunk}
 </案件描述片段>
 """,
-        "people": f"""
+        "people":
+        f"""
 你的任务是从案件描述片段中提取所有出现的人物（自然人）。你的回答应为一个字符串，其中包含所有人物的姓名、职业和在当次审判中的角色，人物之间用换行符分隔，姓名、职业、角色之间用半角分号分隔：
 
 - 格式："人物1;职业1;角色1\n人物2;职业2;角色2\n人物3;职业3;角色3"
@@ -106,7 +112,8 @@ def extract_metadata_with_llm(chunk, client):
 {chunk}
 </案件描述片段>
 """,
-        "numbers": f"""
+        "numbers":
+        f"""
 你的任务是从案件描述片段中提取所有出现的数额。你的回答应为一个字符串，其中包含所有数额，用换行符分隔：
 
 - 格式："数额1\n数额2\n数额3"
@@ -126,7 +133,8 @@ def extract_metadata_with_llm(chunk, client):
 {chunk}
 </案件描述片段>
 """,
-        "defendants": f"""
+        "criminals_llm":
+        f"""
 你的任务是从案件描述片段中提取所有被告人。你的回答应为一个字符串，其中包含所有被告人的姓名，用换行符分隔：
 
 - 格式："被告人姓名1\n被告人姓名2\n被告人姓名3"
@@ -136,6 +144,7 @@ def extract_metadata_with_llm(chunk, client):
 要求：
 
 - 不添加"被告"、"被告人"等前缀
+- 提取的被告人必须是自然人，而不能是法人（公司企业、事业单位、政府部门等）
 - 如果在案件描述片段中找不到任何一个被告人，请直接返回："<none>"
 - 不要提供推理过程，直接给出最终结果
 
@@ -196,13 +205,28 @@ def extract_metadata_with_llm(chunk, client):
     # 并行执行所有5个LLM调用
     results = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(extract_single_type, item): item for item in prompts.items()}
-        
+        futures = {
+            executor.submit(extract_single_type, item): item
+            for item in prompts.items()
+        }
+
         for future in as_completed(futures):
             field_name, data = future.result()
             results[field_name] = data
 
+        if len(results["locations"]) > 200:
+            print(111)
+            print(chunk)
+            print(results["locations"])
+            print(111)
+
     return results
+
+
+def embed_with_embedding_model(chunks):
+    client = OpenAI(base_url=EMBEDDING_BASE_URL, api_key="dummy")
+    response = client.embeddings.create(input=chunks, model=EMBEDDING_MODEL)
+    return [data.embedding for data in response.data]
 
 
 def setup_milvus_collection(dense_dim):
@@ -265,13 +289,14 @@ def setup_milvus_collection(dense_dim):
             FieldSchema(name="dates", dtype=DataType.VARCHAR, max_length=300),
             FieldSchema(name="locations",
                         dtype=DataType.VARCHAR,
-                        max_length=300),
-            FieldSchema(name="people", dtype=DataType.VARCHAR, max_length=300),
+                        max_length=700),
+            FieldSchema(name="people", dtype=DataType.VARCHAR,
+                        max_length=1100),
             FieldSchema(name="numbers", dtype=DataType.VARCHAR,
-                        max_length=500),
-            FieldSchema(name="defendants",
+                        max_length=400),
+            FieldSchema(name="criminals_llm",
                         dtype=DataType.VARCHAR,
-                        max_length=100)
+                        max_length=300)
         ])
     schema = CollectionSchema(fields)
     if utility.has_collection(COLLECTION_NAME):
@@ -295,7 +320,8 @@ def setup_milvus_collection(dense_dim):
 
 def record_generator(jsonl_path):
     for item in read_jsonl(jsonl_path):
-        fact = item["fact"].replace(",", "，").replace(";", "；")
+        # 只在逗号前后都不是数字时才替换为中文逗号，避免影响数字格式（如1,000）
+        fact = re.sub(r'(?<!\d),(?!\d)', '，', item["fact"]).replace(";", "；")
         meta = item["meta"]
         fact_id = str(uuid.uuid4())
 
@@ -391,18 +417,15 @@ def process_llm_metadata_parallel(records, llm_client, max_workers=4):
     return parent_records + processed_non_parent
 
 
-def build_insert_data(buffer, embeddings, parent_col):
-    """
-    构建用于插入Milvus的数据数组
+def insert_batch(col, buffer, ef, parent_col):
+    """插入一批数据到Milvus集合中"""
+    if not buffer:
+        return 0
     
-    Args:
-        buffer: 记录缓冲区
-        embeddings: 嵌入向量
-        parent_col: 父级集合（用于判断是否需要parent_id字段）
-    
-    Returns:
-        list: 准备插入的数据数组
-    """
+    chunks = [r["chunk"] for r in buffer]
+    sparse_embeddings = ef(chunks)["sparse"]
+    dense_embeddings = embed_with_embedding_model(chunks)
+        
     to_insert = [
         [r["chunk_id"] for r in buffer],
         [r["fact_id"] for r in buffer],
@@ -414,20 +437,20 @@ def build_insert_data(buffer, embeddings, parent_col):
         [r["imprisonment"] for r in buffer],
         [r["life_imprisonment"] for r in buffer],
         [r["death_penalty"] for r in buffer],
-        embeddings["sparse"],
-        embeddings["dense"],
+        sparse_embeddings,
+        dense_embeddings,
     ]
     if parent_col:
         to_insert.insert(1, [r["parent_id"] for r in buffer])
     if IS_LLM_EXTRACT:
-        to_insert.extend([
-            [r["dates"] for r in buffer],
-            [r["locations"] for r in buffer],
-            [r["people"] for r in buffer],
-            [r["numbers"] for r in buffer],
-            [r["defendants"] for r in buffer]
-        ])
-    return to_insert
+        to_insert.extend([[r["dates"] for r in buffer],
+                          [r["locations"] for r in buffer],
+                          [r["people"] for r in buffer],
+                          [r["numbers"] for r in buffer],
+                          [r["criminals_llm"] for r in buffer]])
+    
+    col.insert(to_insert)
+    return len(buffer)
 
 
 def insert_parent_batch(parent_col, parent_buffer):
@@ -443,7 +466,7 @@ def insert_parent_batch(parent_col, parent_buffer):
     """
     if not parent_buffer:
         return 0
-        
+
     parent_col.insert([
         [r["parent_id"] for r in parent_buffer],  # parent_id
         [r["fact_id"] for r in parent_buffer],  # fact_id
@@ -481,11 +504,7 @@ def insert_data_streaming(col,
                     buffer = process_llm_metadata_parallel(
                         buffer, llm_client, max_workers)
 
-                chunks = [r["chunk"] for r in buffer]
-                embeddings = ef(chunks)
-                to_insert = build_insert_data(buffer, embeddings, parent_col)
-                col.insert(to_insert)
-                total += len(buffer)
+                total += insert_batch(col, buffer, ef, parent_col)
                 buffer = []
     # 插入剩余部分
     if buffer:
@@ -497,11 +516,7 @@ def insert_data_streaming(col,
             buffer = process_llm_metadata_parallel(buffer, llm_client,
                                                    max_workers)
 
-        chunks = [r["chunk"] for r in buffer]
-        embeddings = ef(chunks)
-        to_insert = build_insert_data(buffer, embeddings, parent_col)
-        col.insert(to_insert)
-        total += len(buffer)
+        total += insert_batch(col, buffer, ef, parent_col)
 
     if parent_buffer:
         total_parent += insert_parent_batch(parent_col, parent_buffer)
@@ -528,7 +543,7 @@ def main():
         '--llm-workers',
         type=int,
         default=4,
-        help='Number of threads for LLM processing (default: 4)')
+        help='Number of threads for LLM extraction (default: 4)')
     args = parser.parse_args()
 
     path = args.jsonl_path

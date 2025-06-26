@@ -26,7 +26,9 @@ COLLECTION_NAME = "civil_case"
 CHUNK_SIZE = 256
 CHUNK_OVERLAP = 32
 BATCH_SIZE = 2000
-CHAT_BASE_URL = "http://app-vllm-enflame-xxxxxxxx.namespace.svc.cluster.local/v1"
+EMBEDDING_BASE_URL = "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
+EMBEDDING_MODEL = "Qwen3-Embedding-0.6B"
+CHAT_BASE_URL = "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
 CHAT_MODEL = "Qwen3-32B"
 SYSTEM_PROMPT = "你是一名精确的法律信息提取助手，擅长从裁判文书中提取关键元素。"
 
@@ -153,7 +155,8 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
 def extract_metadata_with_llm(chunk, client):
     # 定义所有prompt模板
     prompts = {
-        "dates": f"""
+        "dates":
+        f"""
 你的任务是从裁判文书片段中提取所有出现的日期。你的回答应为一个字符串，其中包含所有日期，用换行符分隔：
 
 - 格式："YYYYMMDD\nYYYYMM\nYYYY"
@@ -171,7 +174,8 @@ def extract_metadata_with_llm(chunk, client):
 {chunk}
 </裁判文书片段>
 """,
-        "locations": f"""
+        "locations":
+        f"""
 你的任务是从裁判文书片段中提取所有出现的地点。你的回答应为一个字符串，其中包含所有地点，用换行符分隔：
 
 - 格式："地点1\n地点2\n地点3"
@@ -190,7 +194,8 @@ def extract_metadata_with_llm(chunk, client):
 {chunk}
 </裁判文书片段>
 """,
-        "people": f"""
+        "people":
+        f"""
 你的任务是从裁判文书片段中提取所有出现的人物（自然人）。你的回答应为一个字符串，其中包含所有人物的姓名、职业和在当次审判中的角色，人物之间用换行符分隔，姓名、职业、角色之间用半角分号分隔：
 
 - 格式："人物1;职业1;角色1\n人物2;职业2;角色2\n人物3;职业3;角色3"
@@ -209,7 +214,8 @@ def extract_metadata_with_llm(chunk, client):
 {chunk}
 </裁判文书片段>
 """,
-        "numbers": f"""
+        "numbers":
+        f"""
 你的任务是从裁判文书片段中提取所有出现的数额。你的回答应为一个字符串，其中包含所有数额，用换行符分隔：
 
 - 格式："数额1\n数额2\n数额3"
@@ -229,7 +235,8 @@ def extract_metadata_with_llm(chunk, client):
 {chunk}
 </裁判文书片段>
 """,
-        "parties_llm": f"""
+        "parties_llm":
+        f"""
 你的任务是从裁判文书片段中提取所有出现的当事人。你的回答应为一个字符串，其中包含原告（上诉人）、被告（被上诉人）、原审原告、原审被告，用换行符分隔：
 
 - 格式："原告1\n被告1\n原审原告1\n原审被告1"
@@ -269,14 +276,16 @@ def extract_metadata_with_llm(chunk, client):
                         },
                     ],
                     extra_body={
-                        "chat_template_kwargs": {"enable_thinking": False},
+                        "chat_template_kwargs": {
+                            "enable_thinking": False
+                        },
                     },
                     temperature=0.0)
                 data = response.choices[0].message.content.strip()
-                
+
                 if len(data) > 100:
                     data = data.split("：\n")[-1].split("\n\n")[-1]
-                    
+
                 return field_name, data
             except Exception as e:
                 if attempt < max_retries:
@@ -298,13 +307,22 @@ def extract_metadata_with_llm(chunk, client):
     # 并行执行所有5个LLM调用
     results = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(extract_single_type, item): item for item in prompts.items()}
-        
+        futures = {
+            executor.submit(extract_single_type, item): item
+            for item in prompts.items()
+        }
+
         for future in as_completed(futures):
             field_name, data = future.result()
             results[field_name] = data
 
     return results
+
+
+def embed_with_embedding_model(chunks):
+    client = OpenAI(base_url=EMBEDDING_BASE_URL, api_key="dummy")
+    response = client.embeddings.create(input=chunks, model=EMBEDDING_MODEL)
+    return [data.embedding for data in response.data]
 
 
 def setup_milvus_collection(dense_dim):
@@ -348,9 +366,7 @@ def setup_milvus_collection(dense_dim):
         FieldSchema(name="judgment_date",
                     dtype=DataType.VARCHAR,
                     max_length=17),
-        FieldSchema(name="parties",
-                    dtype=DataType.VARCHAR,
-                    max_length=400),
+        FieldSchema(name="parties", dtype=DataType.VARCHAR, max_length=400),
         FieldSchema(name="case_cause", dtype=DataType.VARCHAR, max_length=100),
         FieldSchema(name="legal_basis", dtype=DataType.JSON),
         FieldSchema(name="sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
@@ -408,7 +424,9 @@ def record_generator(csv_path, chunksize):
     for item in read_csv_streaming(csv_path, chunksize=chunksize):
         if pd.isna(item["全文"]):
             continue
-        full_text = item["全文"].replace(",", "，").replace(";", "；")
+        # 只在逗号前后都不是数字时才替换为中文逗号，避免影响数字格式（如1,000）
+        full_text = re.sub(r'(?<!\d),(?!\d)', '，',
+                           item["全文"]).replace(";", "；")
         # 将连续的空白字符替换为单个空格
         full_text = re.sub(r'\s+', ' ', full_text)
 
@@ -509,31 +527,29 @@ def process_llm_metadata_parallel(records, llm_client, max_workers=4):
     # 分离parent和非parent记录
     parent_records = [r for r in records if r.get("is_parent", False)]
     non_parent_records = [r for r in records if not r.get("is_parent", False)]
-    
+
     # 如果没有非parent记录需要处理，直接返回原记录
     if not non_parent_records:
         return records
-    
+
     # 并行处理非parent记录 - 使用map更简洁
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        processed_non_parent = list(executor.map(process_single_record, non_parent_records))
-    
+        processed_non_parent = list(
+            executor.map(process_single_record, non_parent_records))
+
     # 简单合并：parent记录 + 处理后的非parent记录
     return parent_records + processed_non_parent
 
 
-def build_insert_data(buffer, embeddings, parent_col):
-    """
-    构建用于插入Milvus的数据数组
-    
-    Args:
-        buffer: 记录缓冲区
-        embeddings: 嵌入向量
-        parent_col: 父级集合（用于判断是否需要parent_id字段）
-    
-    Returns:
-        list: 准备插入的数据数组
-    """
+def insert_batch(col, buffer, ef, parent_col):
+    """插入一批数据到Milvus集合中"""
+    if not buffer:
+        return 0
+
+    chunks = [r["chunk"] for r in buffer]
+    sparse_embeddings = ef(chunks)["sparse"]
+    dense_embeddings = embed_with_embedding_model(chunks)
+
     to_insert = [
         [r["chunk_id"] for r in buffer],
         [r["case_id"] for r in buffer],
@@ -546,20 +562,20 @@ def build_insert_data(buffer, embeddings, parent_col):
         [r["parties"] for r in buffer],
         [r["case_cause"] for r in buffer],
         [r["legal_basis"] for r in buffer],
-        embeddings["sparse"],
-        embeddings["dense"],
+        sparse_embeddings,
+        dense_embeddings,
     ]
     if parent_col:
         to_insert.insert(1, [r["parent_id"] for r in buffer])
     if IS_LLM_EXTRACT:
-        to_insert.extend([
-            [r["dates"] for r in buffer],
-            [r["locations"] for r in buffer],
-            [r["people"] for r in buffer],
-            [r["numbers"] for r in buffer],
-            [r["parties_llm"] for r in buffer]
-        ])
-    return to_insert
+        to_insert.extend([[r["dates"] for r in buffer],
+                          [r["locations"] for r in buffer],
+                          [r["people"] for r in buffer],
+                          [r["numbers"] for r in buffer],
+                          [r["parties_llm"] for r in buffer]])
+
+    col.insert(to_insert)
+    return len(buffer)
 
 
 def insert_parent_batch(parent_col, parent_buffer):
@@ -575,7 +591,7 @@ def insert_parent_batch(parent_col, parent_buffer):
     """
     if not parent_buffer:
         return 0
-        
+
     parent_col.insert([
         [r["parent_id"] for r in parent_buffer],  # parent_id
         [r["case_id"] for r in parent_buffer],  # case_id
@@ -613,11 +629,7 @@ def insert_data_streaming(col,
                     buffer = process_llm_metadata_parallel(
                         buffer, llm_client, max_workers)
 
-                chunks = [r["chunk"] for r in buffer]
-                embeddings = ef(chunks)
-                to_insert = build_insert_data(buffer, embeddings, parent_col)
-                col.insert(to_insert)
-                total += len(buffer)
+                total += insert_batch(col, buffer, ef, parent_col)
                 buffer = []
 
     # 插入剩余部分
@@ -630,11 +642,7 @@ def insert_data_streaming(col,
             buffer = process_llm_metadata_parallel(buffer, llm_client,
                                                    max_workers)
 
-        chunks = [r["chunk"] for r in buffer]
-        embeddings = ef(chunks)
-        to_insert = build_insert_data(buffer, embeddings, parent_col)
-        col.insert(to_insert)
-        total += len(buffer)
+        total += insert_batch(col, buffer, ef, parent_col)
 
     if parent_buffer:
         total_parent += insert_parent_batch(parent_col, parent_buffer)
@@ -660,7 +668,7 @@ def main():
         '--llm-workers',
         type=int,
         default=4,
-        help='Number of threads for LLM processing (default: 4)')
+        help='Number of threads for LLM extraction (default: 4)')
     parser.add_argument(
         '--csv-chunksize',
         type=int,
