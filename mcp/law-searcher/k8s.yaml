@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: mcp-server-law-searcher
-        image: registry.qy.t9kcloud.cn/topsrider/mcp-server:law-searcher-20250624
+        image: registry.qy.t9kcloud.cn/topsrider/mcp-server:law-searcher-20250627
         imagePullPolicy: Always
         # args: ["--sse"]
         ports:
@@ -46,12 +46,12 @@ spec:
           failureThreshold: 3
         resources:
           requests:
-            memory: "512Mi"
-            cpu: "250m"
+            memory: 4Gi
+            cpu: 2
             enflame.com/gcu: "1"
           limits:
-            memory: "2Gi"
-            cpu: "1000m"
+            memory: 8Gi
+            cpu: 4
             enflame.com/gcu: "1"
         securityContext:
           allowPrivilegeEscalation: false
@@ -121,3 +121,6 @@ data:
   MILVUS_DB: "default"
   MILVUS_COLLECTION_CRIMINAL_LAW: "criminal_law"
   MILVUS_COLLECTION_CIVIL_CODE: "civil_code"
+  EMBEDDING_BASE_URL: "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
+  EMBEDDING_MODEL: "Qwen3-Embedding-0.6B"
+  ENABLE_AUTH: "false"

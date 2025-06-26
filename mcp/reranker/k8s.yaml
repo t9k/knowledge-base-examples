@@ -116,6 +116,6 @@ kind: ConfigMap
 metadata:
   name: mcp-server-reranker-config
 data:
-  RERANKER_BASE_URL: "http://reranker-service:8001"
-  RERANKER_MODEL: "BAAI/bge-reranker-v2-m3"
+  RERANKER_BASE_URL: "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn"
+  RERANKER_MODEL: "bge-reranker-v2-m3"
   ENABLE_AUTH: "false"

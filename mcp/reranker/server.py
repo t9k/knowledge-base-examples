@@ -1,5 +1,7 @@
 import argparse
 import os
+import ast
+import re
 from typing import Annotated
 from pydantic import Field
 from dotenv import load_dotenv
@@ -13,7 +15,6 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 enable_auth = os.environ.get("ENABLE_AUTH", "false") == "true"
 if enable_auth:
@@ -41,11 +42,9 @@ async def rerank(
     
     注意：
 
-    1. 必须将 search 系列工具返回的字符串原封不动地传入到 search_results 参数，例如
-        "Sparse vector search results for '行纪合同':\n\n{'chunk_id': ...
+    1. 必须将 law-searcher 或 case-searcher 的 search 系列工具返回的字符串原封不动地传入到
+        search_results 参数，例如 "Sparse vector search results for '行纪合同':\n\n{'chunk_id': ...
     """
-    import ast
-    import re
 
     # 解析搜索结果
     parts = search_results.split("\n\n")

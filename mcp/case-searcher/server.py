@@ -1,12 +1,15 @@
 import argparse
 import os
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Optional, List
+import logging
+from typing import Annotated, AsyncIterator, Optional
+from pydantic import Field
 from dotenv import load_dotenv
 from fastmcp import FastMCP, Context
+from fastmcp.server.auth import BearerAuthProvider
+from fastmcp.server.auth.providers.bearer import RSAKeyPair
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
-import uvicorn
 from pymilvus import (
     connections,
     Collection,
@@ -14,25 +17,22 @@ from pymilvus import (
     RRFRanker,
 )
 from pymilvus.model.hybrid import BGEM3EmbeddingFunction
+from openai import OpenAI
 import torch
 import torch_gcu
 
-ef = BGEM3EmbeddingFunction(use_fp16=False, device="gcu")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class MilvusConnector:
 
-    def __init__(
-        self,
-        uri: str,
-        token: Optional[str] = None,
-        db_name: Optional[str] = "default",
-        criminal_case_collection_name: Optional[str] = "criminal_case",
-        criminal_case_parent_collection_name: Optional[
-            str] = "criminal_case_parent",
-        civil_case_collection_name: Optional[str] = "civil_case",
-        civil_case_parent_collection_name: Optional[str] = "civil_case_parent"
-    ):
+    def __init__(self, uri: str, token: str, db_name: str,
+                 criminal_case_collection_name: str,
+                 criminal_case_parent_collection_name: str,
+                 civil_case_collection_name: str,
+                 civil_case_parent_collection_name: str,
+                 embedding_base_url: str, embedding_model: str):
         self.uri = uri
         self.token = token
         connections.connect(uri=uri, token=token, db_name=db_name)
@@ -60,6 +60,10 @@ class MilvusConnector:
             "parent_id", "dates", "locations", "people", "numbers",
             "parties_llm"
         ]
+
+        self.embedding_client = OpenAI(base_url=embedding_base_url,
+                                       api_key="dummy")
+        self.embedding_model = embedding_model
 
     def check_collections(self) -> None:
         """Check if collections have the expected schema."""
@@ -312,8 +316,7 @@ class MilvusConnector:
             parent_collection = self.criminal_case_parent_collection
 
         try:
-            query_embeddings = ef([query_text])
-            sparse_embedding = query_embeddings["sparse"][[0]]
+            sparse_embedding = ef([query_text])["sparse"][[0]]
 
             sparse_search_params = {"metric_type": "IP", "params": {}}
             results = collection.search(data=[sparse_embedding],
@@ -364,8 +367,9 @@ class MilvusConnector:
             parent_collection = self.civil_case_parent_collection
 
         try:
-            query_embeddings = ef([query_text])
-            dense_embedding = query_embeddings["dense"][0]
+            dense_embedding = self.embedding_client.embeddings.create(
+                input=[query_text],
+                model=self.embedding_model).data[0].embedding
 
             dense_search_params = {"metric_type": "COSINE", "params": {}}
             results = collection.search(data=[dense_embedding],
@@ -416,9 +420,10 @@ class MilvusConnector:
             parent_collection = self.criminal_case_parent_collection
 
         try:
-            query_embeddings = ef([query_text])
-            sparse_embedding = query_embeddings["sparse"][[0]]
-            dense_embedding = query_embeddings["dense"][0]
+            sparse_embedding = ef([query_text])["sparse"][[0]]
+            dense_embedding = self.embedding_client.embeddings.create(
+                input=[query_text],
+                model=self.embedding_model).data[0].embedding
 
             sparse_search_params = {"metric_type": "IP", "params": {}}
             dense_search_params = {"metric_type": "COSINE", "params": {}}
@@ -490,14 +495,35 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[MilvusContext]:
         pass
 
 
-mcp = FastMCP(name="Milvus", lifespan=server_lifespan)
+enable_auth = os.environ.get("ENABLE_AUTH", "false") == "true"
+if enable_auth:
+    # 动态生成RSA密钥对
+    key_pair = RSAKeyPair.generate()
+    auth = BearerAuthProvider(public_key=key_pair.public_key)
+    token = key_pair.create_token(expires_in_seconds=86400 * 30)
+    mcp = FastMCP(name="Case Searcher", lifespan=server_lifespan, auth=auth)
+    logger.info("Authentication enabled")
+else:
+    mcp = FastMCP(name="Case Searcher", lifespan=server_lifespan)
+    logger.info("Authentication disabled")
+
 
 @mcp.tool()
 async def criminal_case_sparse_search(
-    query_text: str,
-    limit: int = 10,
-    filter_expr: Optional[str] = None,
-    parent_child: bool = False,
+    query_text: Annotated[str, Field(description="Text to search for")],
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=100
+              )] = 10,
+    filter_expr: Annotated[
+        Optional[str],
+        Field(description=(
+            "Optional filter expression for metadata filtering, e.g. "
+            "'accusation like \"%毒品%\" and imprisonment > 120', 'death_penalty'"
+        ))] = None,
+    parent_child: Annotated[
+        bool,
+        Field(description="Whether to use Parent Document Retrieval")] = False,
     ctx: Context = None,
 ) -> str:
     """
@@ -525,12 +551,6 @@ async def criminal_case_sparse_search(
     注意：
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
-
-    Args:
-        query_text: Text to search for
-        limit: Maximum number of results to return
-        filter_expr: Optional filter expression for metadata filtering, e.g. 'accusation like "%毒品%" and imprisonment > 120', 'death_penalty'
-        parent_child: Whether to use Parent Document Retrieval
     """
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
@@ -546,12 +566,23 @@ async def criminal_case_sparse_search(
 
     return output
 
+
 @mcp.tool()
 async def criminal_case_dense_search(
-    query_text: str,
-    limit: int = 10,
-    filter_expr: Optional[str] = None,
-    parent_child: bool = False,
+    query_text: Annotated[str, Field(description="Text to search for")],
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=100
+              )] = 10,
+    filter_expr: Annotated[
+        Optional[str],
+        Field(description=(
+            "Optional filter expression for metadata filtering, e.g. "
+            "'accusation like \"%毒品%\" and imprisonment > 120', 'death_penalty'"
+        ))] = None,
+    parent_child: Annotated[
+        bool,
+        Field(description="Whether to use Parent Document Retrieval")] = False,
     ctx: Context = None,
 ) -> str:
     """
@@ -579,12 +610,6 @@ async def criminal_case_dense_search(
     注意：
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
-
-    Args:
-        query_text: Text to search for
-        limit: Maximum number of results to return
-        filter_expr: Optional filter expression for metadata filtering, e.g. 'accusation like "%毒品%" and imprisonment > 120', 'death_penalty'
-        parent_child: Whether to use Parent Document Retrieval
     """
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(
@@ -600,12 +625,23 @@ async def criminal_case_dense_search(
 
     return output
 
+
 @mcp.tool()
 async def criminal_case_hybrid_search(
-    query_text: str,
-    limit: int = 10,
-    filter_expr: Optional[str] = None,
-    parent_child: bool = False,
+    query_text: Annotated[str, Field(description="Text to search for")],
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=100
+              )] = 10,
+    filter_expr: Annotated[
+        Optional[str],
+        Field(description=(
+            "Optional filter expression for metadata filtering, e.g. "
+            "'accusation like \"%毒品%\" and imprisonment > 120', 'death_penalty'"
+        ))] = None,
+    parent_child: Annotated[
+        bool,
+        Field(description="Whether to use Parent Document Retrieval")] = False,
     ctx: Context = None,
 ) -> str:
     """
@@ -633,12 +669,6 @@ async def criminal_case_hybrid_search(
     注意：
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
-
-    Args:
-        query_text: Text to search for
-        limit: Maximum number of results to return
-        filter_expr: Optional filter expression for metadata filtering, e.g. 'accusation like "%毒品%" and imprisonment > 120', 'death_penalty'
-        parent_child: Whether to use Parent Document Retrieval
     """
     connector = ctx.request_context.lifespan_context.connector
 
@@ -659,10 +689,20 @@ async def criminal_case_hybrid_search(
 
 @mcp.tool()
 async def civil_case_sparse_search(
-    query_text: str,
-    limit: int = 10,
-    filter_expr: Optional[str] = None,
-    parent_child: bool = False,
+    query_text: Annotated[str, Field(description="Text to search for")],
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=100
+              )] = 10,
+    filter_expr: Annotated[
+        Optional[str],
+        Field(description=(
+            "Optional filter expression for metadata filtering, e.g. "
+            "'court like \"%沈阳市%\" and judgment_date like \"%2021年9月%\"'"
+            ", 'case_cause == \"合同纠纷\"'"))] = None,
+    parent_child: Annotated[
+        bool,
+        Field(description="Whether to use Parent Document Retrieval")] = False,
     ctx: Context = None,
 ) -> str:
     """
@@ -691,12 +731,6 @@ async def civil_case_sparse_search(
     注意：
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
-
-    Args:
-        query_text: Text to search for
-        limit: Maximum number of results to return.
-        filter_expr: Optional filter expression for metadata filtering, e.g. 'court like "%沈阳市%" and judgment_date like "%2021年9月%"', 'case_cause == "合同纠纷"'
-        parent_child: Whether to use Parent Document Retrieval
     """
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
@@ -715,10 +749,20 @@ async def civil_case_sparse_search(
 
 @mcp.tool()
 async def civil_case_dense_search(
-    query_text: str,
-    limit: int = 10,
-    filter_expr: Optional[str] = None,
-    parent_child: bool = False,
+    query_text: Annotated[str, Field(description="Text to search for")],
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=100
+              )] = 10,
+    filter_expr: Annotated[
+        Optional[str],
+        Field(description=(
+            "Optional filter expression for metadata filtering, e.g. "
+            "'court like \"%沈阳市%\" and judgment_date like \"%2021年9月%\"'"
+            ", 'case_cause == \"合同纠纷\"'"))] = None,
+    parent_child: Annotated[
+        bool,
+        Field(description="Whether to use Parent Document Retrieval")] = False,
     ctx: Context = None,
 ) -> str:
     """
@@ -747,12 +791,6 @@ async def civil_case_dense_search(
     注意：
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
-
-    Args:
-        query_text: Text to search for
-        limit: Maximum number of results to return.
-        filter_expr: Optional filter expression for metadata filtering, e.g. 'court like "%沈阳市%" and judgment_date like "%2021年9月%"', 'case_cause == "合同纠纷"'
-        parent_child: Whether to use Parent Document Retrieval
     """
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(
@@ -771,10 +809,20 @@ async def civil_case_dense_search(
 
 @mcp.tool()
 async def civil_case_hybrid_search(
-    query_text: str,
-    limit: int = 10,
-    filter_expr: Optional[str] = None,
-    parent_child: bool = False,
+    query_text: Annotated[str, Field(description="Text to search for")],
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=100
+              )] = 10,
+    filter_expr: Annotated[
+        Optional[str],
+        Field(description=(
+            "Optional filter expression for metadata filtering, e.g. "
+            "'court like \"%沈阳市%\" and judgment_date like \"%2021年9月%\"'"
+            ", 'case_cause == \"合同纠纷\"'"))] = None,
+    parent_child: Annotated[
+        bool,
+        Field(description="Whether to use Parent Document Retrieval")] = False,
     ctx: Context = None,
 ) -> str:
     """
@@ -803,12 +851,6 @@ async def civil_case_hybrid_search(
     注意：
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
-
-    Args:
-        query_text: Text to search for
-        limit: Maximum number of results to return.
-        filter_expr: Optional filter expression for metadata filtering, e.g. 'court like "%沈阳市%" and judgment_date like "%2021年9月%"', 'case_cause == "合同纠纷"'
-        parent_child: Whether to use Parent Document Retrieval
     """
     connector = ctx.request_context.lifespan_context.connector
 
@@ -838,7 +880,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def main():
+if __name__ == "__main__":
     load_dotenv()
     args = parse_arguments()
     mcp.config = {
@@ -856,13 +898,23 @@ def main():
         os.environ.get("MILVUS_COLLECTION_CIVIL_CASE"),
         "civil_case_parent_collection_name":
         os.environ.get("MILVUS_COLLECTION_CIVIL_CASE_PARENT"),
+        "embedding_base_url":
+        os.environ.get("EMBEDDING_BASE_URL"),
+        "embedding_model":
+        os.environ.get("EMBEDDING_MODEL"),
     }
 
+    ef = BGEM3EmbeddingFunction(use_fp16=False, device="gcu")
+
     if args.sse:
+        if enable_auth:
+            logger.info("Token for Auth: %s", token)
+        else:
+            logger.info("Authentication disabled - no token required")
         mcp.run(transport="sse", port=8000, host="0.0.0.0")
     else:
+        if enable_auth:
+            logger.info("Token for Auth: %s", token)
+        else:
+            logger.info("Authentication disabled - no token required")
         mcp.run(transport="streamable-http", port=8000, host="0.0.0.0")
-
-
-if __name__ == "__main__":
-    main()

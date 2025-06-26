@@ -13,7 +13,17 @@
 - 支持元数据筛选和条件查询
 - 支持父子文档检索模式，可获得更完整的案例上下文
 - 提供健康检查端点
-- 支持 SSE (Server-Sent Events) 传输模式
+- 支持 sse 和 streamable-http 传输模式
+- 可配置的身份认证（JWT Bearer Token）
+
+### 身份认证
+
+当 `ENABLE_AUTH=true` 时，服务器会启用JWT Bearer Token认证：
+- 服务启动时会动态生成RSA密钥对
+- 生成30天有效期的JWT token
+- 客户端需要在请求头中包含 `Authorization: Bearer <token>`
+
+当 `ENABLE_AUTH=false` 时，服务器不需要任何认证即可访问。
 
 ## 部署
 
@@ -30,7 +40,7 @@ kubectl apply -f k8s.yaml
 1. 安装依赖：
 
 ```bash
-pip install pymilvus[model]==2.5.10 fastmcp==2.8.1 python-dotenv uvicorn torch torch_gcu
+pip install pymilvus[model]==2.5.10 fastmcp==2.8.1 python-dotenv uvicorn
 ```
 
 2. 创建 `.env` 文件：
@@ -43,15 +53,18 @@ MILVUS_COLLECTION_CRIMINAL_CASE=criminal_case
 MILVUS_COLLECTION_CRIMINAL_CASE_PARENT=criminal_case_parent
 MILVUS_COLLECTION_CIVIL_CASE=civil_case
 MILVUS_COLLECTION_CIVIL_CASE_PARENT=civil_case_parent
+EMBEDDING_BASE_URL=http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1
+EMBEDDING_MODEL=Qwen3-Embedding-0.6B
+ENABLE_AUTH=false
 ```
 
 3. 启动服务：
 
 ```bash
-# 启动 SSE 模式
+# 启动 sse 模式
 python server.py --sse
 
-# 启动标准模式
+# 启动 streamable-http 模式
 python server.py
 ```
 
@@ -143,12 +156,12 @@ python server.py
 
 刑事案例检索：
 
-1. **criminal_case_sparse_search**：稀疏向量检索，适用于专有名词、人名、地名等
-2. **criminal_case_dense_search**：密集向量检索，适用于语义检索
-3. **criminal_case_hybrid_search**：混合检索，适用于大多数情况（推荐）
+1. `criminal_case_sparse_search`：稀疏向量检索，适用于专有名词、人名、地名等
+1. `criminal_case_dense_search`：密集向量检索，适用于语义检索
+1. `criminal_case_hybrid_search`：混合检索，适用于大多数情况
 
 民事案例检索：
 
-1. **civil_case_sparse_search**：稀疏向量检索，适用于专有名词、人名、地名等
-2. **civil_case_dense_search**：密集向量检索，适用于语义检索
-3. **civil_case_hybrid_search**：混合检索，适用于大多数情况（推荐）
+1. `civil_case_sparse_search`：稀疏向量检索，适用于专有名词、人名、地名等
+1. `civil_case_dense_search`：密集向量检索，适用于语义检索
+1. `civil_case_hybrid_search`：混合检索，适用于大多数情况
