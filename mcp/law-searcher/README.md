@@ -13,7 +13,17 @@
   - `hybrid_search`: 混合检索，结合稀疏和密集向量（推荐）
 - 支持元数据筛选和条件查询
 - 提供健康检查端点
-- 支持 SSE (Server-Sent Events) 传输模式
+- 支持 sse 和 streamable-http 传输模式
+- 可配置的身份认证（JWT Bearer Token）
+
+### 身份认证
+
+当 `ENABLE_AUTH=true` 时，服务器会启用JWT Bearer Token认证：
+- 服务启动时会动态生成RSA密钥对
+- 生成30天有效期的JWT token
+- 客户端需要在请求头中包含 `Authorization: Bearer <token>`
+
+当 `ENABLE_AUTH=false` 时，服务器不需要任何认证即可访问。
 
 ## 部署
 
@@ -41,15 +51,18 @@ MILVUS_TOKEN=your_token
 MILVUS_DB=default
 MILVUS_COLLECTION_CRIMINAL_LAW=criminal_law
 MILVUS_COLLECTION_CIVIL_CODE=civil_code
+EMBEDDING_BASE_URL=http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1
+EMBEDDING_MODEL=Qwen3-Embedding-0.6B
+ENABLE_AUTH=false
 ```
 
 3. 启动服务：
 
 ```bash
-# 启动 SSE 模式
+# 启动 sse 模式
 python server.py --sse
 
-# 启动标准模式
+# 启动 streamable-http 模式
 python server.py
 ```
 
@@ -99,14 +112,14 @@ python server.py
 
 刑法检索：
 
-1. criminal_law_query：使用过滤表达式进行精确查询
-1. criminal_law_sparse_search：稀疏向量检索，适用于专有名词
-1. criminal_law_dense_search：密集向量检索，适用于语义检索
-1. criminal_law_hybrid_search：混合检索，适用于大多数情况
+1. `criminal_law_query`：使用过滤表达式进行精确查询
+1. `criminal_law_sparse_search`：稀疏向量检索，适用于专有名词
+1. `criminal_law_dense_search`：密集向量检索，适用于语义检索
+1. `criminal_law_hybrid_search`：混合检索，适用于大多数情况
 
 民法典检索：
 
-1. civil_code_query：使用过滤表达式进行精确查询
-1. civil_code_sparse_search：稀疏向量检索，适用于专有名词
-1. civil_code_dense_search：密集向量检索，适用于语义检索
-1. civil_code_hybrid_search：混合检索，适用于大多数情况
+1. `civil_code_query`：使用过滤表达式进行精确查询
+1. `civil_code_sparse_search`：稀疏向量检索，适用于专有名词
+1. `civil_code_dense_search`：密集向量检索，适用于语义检索
+1. `civil_code_hybrid_search`：混合检索，适用于大多数情况
