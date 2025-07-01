@@ -1,15 +1,16 @@
 # 检索法律案例知识库的 MCP Server
 
-这是一个基于 MCP (Model Context Protocol) 和 Milvus 的法律案例检索服务，专门用于检索中国刑事案例和民事案例。该服务使用 BGE-M3 模型提供多种检索方式，支持元数据筛选和语义检索，支持父子文档检索以获得更完整的上下文。
+这是一个基于 MCP (Model Context Protocol) 和 Milvus 的法律案例检索服务，专门用于检索中国刑事案例和民事案例。该服务使用 Qwen3-Embedding-0.6B 和 BGE-M3 模型提供多种检索方式，支持元数据过滤和向量检索，支持父子文档检索以获得更完整的上下文。
 
 ## 功能
 
 - 实现了完整的 MCP 服务器协议，可与支持 MCP 的客户端集成
 - 支持中国刑事案例和民事案例的检索
-- 集成 BGE-M3 模型，支持三种检索模式：
+- Qwen3-Embedding-0.6B 模型提供密集嵌入，BGE-M3 模型提供稀疏嵌入，支持四种检索模式：
+  - `query`: 使用过滤表达式进行精确查询
   - `sparse_search`: 稀疏向量检索，适用于专有名词、人名、地名等
   - `dense_search`: 密集向量检索，适用于语义检索
-  - `hybrid_search`: 混合检索，结合稀疏和密集向量（推荐）
+  - `hybrid_search`: 混合检索，结合稀疏和密集向量
 - 支持元数据筛选和条件查询
 - 支持父子文档检索模式，可获得更完整的案例上下文
 - 提供健康检查端点
@@ -70,11 +71,11 @@ python server.py
 
 ## 混合检索支持
 
-服务集成了 BGE-M3 模型，支持同时使用密集向量和稀疏向量进行混合检索，通过 RRF (Reciprocal Rank Fusion) 算法融合两种检索结果，提高检索质量。
+服务调用 Qwen3-Embedding-0.6B 模型提供密集嵌入，集成 BGE-M3 模型提供稀疏嵌入，支持同时使用密集向量和稀疏向量进行混合检索，通过 RRF (Reciprocal Rank Fusion) 算法融合两种检索结果，提高检索质量。
 
 ### 混合检索工作流程
 
-1. 使用 BGE-M3 模型将用户查询转换为密集向量和稀疏向量
+1. 使用 Qwen3-Embedding-0.6B 和 BGE-M3 模型将用户查询转换为密集向量和稀疏向量
 2. 分别用密集向量和稀疏向量在 Milvus 中进行检索
 3. 使用 RRF 算法对两种检索结果进行融合排序
 4. 返回包含元数据的检索结果
@@ -156,12 +157,14 @@ python server.py
 
 刑事案例检索：
 
+1. `criminal_case_query`：使用过滤表达式进行精确查询
 1. `criminal_case_sparse_search`：稀疏向量检索，适用于专有名词、人名、地名等
 1. `criminal_case_dense_search`：密集向量检索，适用于语义检索
 1. `criminal_case_hybrid_search`：混合检索，适用于大多数情况
 
 民事案例检索：
 
+1. `civil_case_query`：使用过滤表达式进行精确查询
 1. `civil_case_sparse_search`：稀疏向量检索，适用于专有名词、人名、地名等
 1. `civil_case_dense_search`：密集向量检索，适用于语义检索
 1. `civil_case_hybrid_search`：混合检索，适用于大多数情况

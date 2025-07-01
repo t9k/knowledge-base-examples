@@ -11,14 +11,6 @@
 - 支持 sse 和 streamable-http 传输模式
 - 可配置的身份认证（JWT Bearer Token）
 
-## 配置
-
-### 环境变量
-
-- `RERANKER_BASE_URL`: 重排序模型API的基础URL（默认: http://localhost:8001）
-- `RERANKER_MODEL`: 使用的重排序模型名称（默认: BAAI/bge-reranker-v2-m3）
-- `ENABLE_AUTH`: 是否启用身份认证（支持 true/false, 1/0, yes/no, on/off，默认: false）
-
 ### 身份认证
 
 当 `ENABLE_AUTH=true` 时，服务器会启用JWT Bearer Token认证：
