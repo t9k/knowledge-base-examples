@@ -5,7 +5,7 @@
 ## 功能
 
 - 实现了 [Dify 外部知识库 API](https://docs.dify.ai/zh-hans/guides/knowledge-base/api-documentation/external-knowledge-api-documentation)
-- 支持 bge-m3 模型的混合检索 (dense + sparse)，提高检索质量
+- Qwen3-Embedding-0.6B 模型提供密集嵌入，BGE-M3 模型提供稀疏嵌入，支持混合检索
 - 集成 Milvus 向量数据库，支持三种检索模式：
   - `dense`: 仅使用密集向量检索
   - `sparse`: 仅使用稀疏向量检索
@@ -21,47 +21,76 @@
 kubectl apply -f k8s.yaml
 ```
 
-如要部署多个服务，手动替换 dify-ekb-server 为其增加名称后缀（镜像 ID 除外），如 dify-ekb-server-law、dify-ekb-server-criminal-cases。
+如要部署多个服务，手动替换 dify-ekb-server 为其增加名称后缀（镜像 ID 除外），如 dify-ekb-server-law、dify-ekb-server-criminal-case。
 
 ## 混合检索支持
 
-服务集成了 bge-m3 模型，支持同时使用密集向量和稀疏向量进行混合检索，通过 RRF (Reciprocal Rank Fusion) 算法融合两种检索结果，提高检索质量。
+服务调用 Qwen3-Embedding-0.6B 模型提供密集嵌入，集成 BGE-M3 模型提供稀疏嵌入，支持同时使用密集向量和稀疏向量进行混合检索，通过 RRF (Reciprocal Rank Fusion) 算法融合两种检索结果，提高检索质量。
 
 ### 混合检索工作流程
 
-1. 使用 bge-m3 模型将用户查询转换为密集向量和稀疏向量
+1. 使用 Qwen3-Embedding-0.6B 和 BGE-M3 模型将用户查询转换为密集向量和稀疏向量
 2. 分别用密集向量和稀疏向量在 Milvus 中进行检索
 3. 使用 RRF 算法对两种检索结果进行融合排序
-4. 对结果进行后处理并返回给客户端
+4. 返回包含元数据的检索结果
 
 ## Milvus Collection 要求
 
 为了使服务正常工作，scenario 为 `law` 时，Milvus Collection 需要包含以下字段：
 
-* chunk_id (VarChar)：chunk 的 uuid
-* chunk (VarChar)：chunk 的内容
-* law (VarChar)：所属法律
-* part (VarChar)：所属编
-* chapter (VarChar)：所属章
-* section (VarChar)：所属节
-* article (Int64)：法条序号（0 表示没有序号）
-* article_amended (Int64)：修正的刑法法条序号（0 表示没有修正刑法法条）
-* sparse_vector (SparseFloatVector)：稀疏嵌入
-* dense_vector	(FloatVector)：密集嵌入
+* `chunk_id` (VarChar)：chunk 的唯一标识符
+* `chunk` (VarChar)：chunk 的内容
+* `law` (VarChar)：所属法律
+* `part` (VarChar)：所属编
+* `chapter` (VarChar)：所属章
+* `section` (VarChar)：所属节
+* `article` (Int64)：法条序号（0 表示没有序号）
+* `article_amended` (Int64)：修正的刑法法条序号（0 表示没有修正刑法法条）
+* `sparse_vector` (SparseFloatVector)：稀疏嵌入
+* `dense_vector` (FloatVector)：密集嵌入
 
-scenario 为 `criminal-cases` 时，Milvus Collection 需要包含以下字段：
+scenario 为 `criminal_case` 时，Milvus Collection 需要包含以下字段：
 
-* chunk_id (VarChar)：chunk 的 uuid
-* chunk (VarChar)：chunk 的内容
-* relevant_articles (Array[Int64])：相关法条
-* accusation (Array[VarChar])：罪名
-* punish_of_money (Int64)：罚金
-* criminals (Array[VarChar])：被告人/罪犯
-* imprisonment (Int64)：刑期（单位：月）
-* life_imprisonment (Bool)：是否无期徒刑
-* death_penalty (Bool)：是否死刑
-* sparse_vector (SparseFloatVector)：稀疏嵌入
-* dense_vector	(FloatVector)：密集嵌入
+- `chunk_id` (VarChar)：chunk 的唯一标识符
+- `parent_id` (VarChar)：父文档标识符
+- `fact_id` (VarChar)：案例事实标识符
+- `chunk` (VarChar)：案例内容片段
+- `relevant_articles` (Array[Int64])：相关刑法法条
+- `accusation` (VarChar)：罪名
+- `punish_of_money` (Int64)：罚金（单位：元）
+- `criminals` (VarChar)：犯罪人
+- `imprisonment` (Int64)：刑期（单位：月）
+- `life_imprisonment` (Boolean)：是否无期徒刑
+- `death_penalty` (Boolean)：是否死刑
+- `dates` (VarChar)：提取的日期信息
+- `locations` (VarChar)：提取的地点信息
+- `people` (VarChar)：提取的人物信息
+- `numbers` (VarChar)：提取的数额信息
+- `criminals_llm` (VarChar)：通过 LLM 提取的犯罪人信息
+- `sparse_vector` (SparseFloatVector)：稀疏嵌入向量
+- `dense_vector` (FloatVector)：密集嵌入向量
+
+scenario 为 `civil_case` 时，Milvus Collection 需要包含以下字段：
+
+- `chunk_id` (VarChar)：chunk 的唯一标识符
+- `case_id` (VarChar)：案例标识符
+- `chunk` (VarChar)：案例内容片段
+- `case_number` (VarChar)：案号
+- `case_name` (VarChar)：案件名称
+- `court` (VarChar)：审理法院
+- `region` (VarChar)：所属地区
+- `judgment_date` (VarChar)：判决日期
+- `parties` (VarChar)：当事人
+- `case_cause` (VarChar)：案由
+- `legal_basis` (JSON)：法律依据
+- `parent_id` (VarChar)：父文档标识符
+- `dates` (VarChar)：提取的日期信息
+- `locations` (VarChar)：提取的地点信息
+- `people` (VarChar)：提取的人物信息
+- `numbers` (VarChar)：提取的数额信息
+- `parties_llm` (VarChar)：通过 LLM 提取的当事人信息
+- `sparse_vector` (SparseFloatVector)：稀疏嵌入向量
+- `dense_vector` (FloatVector)：密集嵌入向量
 
 ## API 使用示例
 

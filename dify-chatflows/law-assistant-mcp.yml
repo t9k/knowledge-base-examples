@@ -1,0 +1,193 @@
+app:
+  description: ''
+  icon: ⚖️
+  icon_background: '#E4FBCC'
+  mode: advanced-chat
+  name: 法律助手（MCP）
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.3.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: '您好，我是您的法律智能助手，专注于刑法领域的信息支持。
+
+
+      您可以通过以下方式使用：
+
+
+      1. 对话：与助手进行一般性对话。
+
+      2. 查询案例：查询刑法案例的案情描述和判决信息（需要增加“案例：”前缀）。
+
+      2. 查询法条：查询刑法的法律条文（需要增加“法条：”前缀）。'
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions:
+    - 刑法：抢劫
+    - 刑法：未成年人犯罪
+    - 民法典：结婚年龄
+    - 民法典：抵押权
+    - 刑事案件：燃放烟花爆竹引发森林火灾
+    - 民事案件：（2021）京01民终5327号
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInLoop: false
+        sourceType: start
+        targetType: agent
+      id: 1750657813424-source-1750657820851-target
+      source: '1750657813424'
+      sourceHandle: source
+      target: '1750657820851'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: agent
+        targetType: answer
+      id: 1750657820851-source-answer-target
+      source: '1750657820851'
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: Start
+        type: start
+        variables: []
+      height: 53
+      id: '1750657813424'
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '{{#1750657820851.text#}}'
+        desc: ''
+        selected: false
+        title: Answer
+        type: answer
+        variables: []
+      height: 105
+      id: answer
+      position:
+        x: 678.9416489953792
+        y: 282
+      positionAbsolute:
+        x: 678.9416489953792
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        agent_parameters:
+          instruction:
+            type: constant
+            value: 你是一名法律智能助手，擅长根据提供的法律条文或裁判文书上下文，准确、简明地回答用户提出的法律问题。你的回答应基于上下文信息，条理清晰、专业可靠，避免主观臆断，不可凭空编造。涉及法律条文的，检索法律向量数据库，结合法条原文进行回答，使用
+              Markdown 的引用格式（行增加前缀 >）引用法条原文；涉及法律案件的，检索案件向量数据库，返回相应的案件信息，或结合案件信息上下文进行回答；涉及人名、地名、专有名词、日期、数额的，必须准确地检索，不得返回相似但不同的结果。注意中文的标点符号为全角符号。
+          mcp_servers_config:
+            type: constant
+            value: "{\n  \"law-searcher\": {\n    \"transport\": \"sse\",\n    \"\
+              url\": \"http://mcp-server-law-searcher-sse-service/sse\"\n  },\n  \"\
+              case-searcher\": {\n    \"transport\": \"sse\",\n    \"url\": \"http://mcp-server-case-searcher-sse-service/sse\"\
+              \n  },\n  \"reranker\": {\n    \"transport\": \"sse\",\n    \"url\"\
+              : \"http://mcp-server-reranker-sse-service/sse\"\n  }\n}"
+          model:
+            type: constant
+            value:
+              completion_params:
+                enable_thinking: true
+                temperature: 0
+              mode: chat
+              model: Qwen3-8B
+              model_type: llm
+              provider: langgenius/openai_api_compatible/openai_api_compatible
+              type: model-selector
+          query:
+            type: constant
+            value: '{{#sys.query#}}'
+        agent_strategy_label: ReAct (Support MCP Tools)
+        agent_strategy_name: mcp_sse_ReAct
+        agent_strategy_provider_name: junjiem/mcp_see_agent/mcp_see_agent
+        desc: ''
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 50
+        output_schema: null
+        plugin_unique_identifier: junjiem/mcp_see_agent:0.2.2@2b54607cf4d6a03b39cdae1425af2d8bafd4dd87f3eef6dc3eaaa945c71c2231
+        selected: true
+        title: Agent
+        type: agent
+      height: 145
+      id: '1750657820851'
+      position:
+        x: 380.39707269962685
+        y: 282
+      positionAbsolute:
+        x: 380.39707269962685
+        y: 282
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 68.93017043836278
+      y: 187.97742677405506
+      zoom: 0.8170721849185709

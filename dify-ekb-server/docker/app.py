@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from functools import wraps
+from openai import OpenAI
 
 from config import MILVUS_CONFIG, OTHER_CONFIG, API_KEYS
 
@@ -116,9 +117,9 @@ def log_response_info(response):
     return response
 
 
-# 初始化嵌入模型
-device = OTHER_CONFIG["embedding"]["device"]
-use_fp16 = OTHER_CONFIG["embedding"]["use_fp16"]
+# 初始化稀疏嵌入模型
+device = OTHER_CONFIG["embedding"]["sparse_embedding_device"]
+use_fp16 = OTHER_CONFIG["embedding"]["sparse_embedding_use_fp16"]
 if device == "gcu":
     import torch
     import torch_gcu
@@ -130,6 +131,11 @@ elif device == "cpu":
 else:
     raise ValueError(f"Unsupported embedding device: {device}")
 logging.info(f"BGEM3 embedding model initialized on {device}")
+
+# 初始化密集嵌入模型
+embedding_base_url = OTHER_CONFIG["embedding"]["dense_embedding_base_url"]
+embedding_model = OTHER_CONFIG["embedding"]["dense_embedding_model"]
+embedding_client = OpenAI(base_url=embedding_base_url, api_key="dummy")
 
 
 # 健康检查端点 - 不需要认证
@@ -234,21 +240,23 @@ def perform_search(collection,
     通用搜索函数，根据搜索模式执行不同的搜索策略
     """
     # 生成查询嵌入
-    query_embeddings = embedding_function([query_text])
+    sparse_embedding = embedding_function([query_text])["sparse"][[0]]
+    dense_embedding = embedding_client.embeddings.create(
+        input=[query_text], model=embedding_model).data[0].embedding
 
     if search_mode == "hybrid":
         # 混合搜索
         hybrid_config = MILVUS_CONFIG["hybrid_search"]
 
         # 创建密集向量搜索请求
-        dense_req = AnnSearchRequest(query_embeddings["dense"],
+        dense_req = AnnSearchRequest([dense_embedding],
                                      hybrid_config["dense_field"],
                                      hybrid_config["dense_params"],
                                      limit=limit,
                                      expr=expr)
 
         # 创建稀疏向量搜索请求
-        sparse_req = AnnSearchRequest([query_embeddings["sparse"]],
+        sparse_req = AnnSearchRequest([sparse_embedding],
                                       hybrid_config["sparse_field"],
                                       hybrid_config["sparse_params"],
                                       limit=limit,
@@ -267,7 +275,7 @@ def perform_search(collection,
         # 密集向量搜索
         dense_config = MILVUS_CONFIG["dense_search"]
 
-        results = collection.search(data=query_embeddings["dense"],
+        results = collection.search(data=[dense_embedding],
                                     anns_field=dense_config["dense_field"],
                                     param=dense_config["params"],
                                     limit=limit,
@@ -278,7 +286,7 @@ def perform_search(collection,
         # 稀疏向量搜索
         sparse_config = MILVUS_CONFIG["sparse_search"]
 
-        results = collection.search(data=[query_embeddings["sparse"]],
+        results = collection.search(data=[sparse_embedding],
                                     anns_field=sparse_config["sparse_field"],
                                     param=sparse_config["params"],
                                     limit=limit,
@@ -466,7 +474,9 @@ def retrieval():
         # 连接到 Milvus
         database_name, collection_name = data.get("knowledge_id").split("/")
         uri = f"{MILVUS_CONFIG['host']}:{MILVUS_CONFIG['port']}"
-        connections.connect(uri=uri, token=MILVUS_CONFIG["token"], db_name=database_name)
+        connections.connect(uri=uri,
+                            token=MILVUS_CONFIG["token"],
+                            db_name=database_name)
         logging.info("Connected to Milvus")
 
         # 获取请求参数
@@ -496,11 +506,18 @@ def retrieval():
                     "chunk", "law", "part", "chapter", "section", "article",
                     "article_amended"
                 ]
-            elif scenario == "criminal-cases":
+            elif scenario == "criminal_case":
                 output_fields = [
                     "chunk", "relevant_articles", "accusation",
                     "punish_of_money", "criminals", "imprisonment",
-                    "life_imprisonment", "death_penalty"
+                    "life_imprisonment", "death_penalty", "dates", "locations",
+                    "people", "numbers", "criminals_llm"
+                ]
+            elif scenario == "civil_case":
+                output_fields = [
+                    "chunk", "case_number", "case_name", "court", "region",
+                    "judgment_date", "parties", "case_cause", "legal_basis",
+                    "dates", "locations", "people", "numbers", "parties_llm"
                 ]
 
             # 执行搜索
@@ -558,26 +575,42 @@ def retrieval():
                         "article": hit.article,
                         "article_amended": hit.article_amended
                     }
-                elif scenario == "criminal-cases":
+                elif scenario == "criminal_case":
                     metadata = {
                         "relevant_articles": list(hit.relevant_articles),
-                        "accusation": list(hit.accusation),
+                        "accusation": hit.accusation,
                         "punish_of_money": hit.punish_of_money,
-                        "criminals": list(hit.criminals),
+                        "criminals": hit.criminals,
                         "imprisonment": hit.imprisonment,
                         "life_imprisonment": hit.life_imprisonment,
-                        "death_penalty": hit.death_penalty
+                        "death_penalty": hit.death_penalty,
+                        "dates": hit.dates,
+                        "locations": hit.locations,
+                        "people": hit.people,
+                        "numbers": hit.numbers,
+                        "criminals_llm": hit.criminals_llm
                     }
-
-                content = hit.chunk
-                if OTHER_CONFIG["result"]["include_metadata"]:
-                    content += "\n\n" + json.dumps(metadata,
-                                                   ensure_ascii=False)
+                elif scenario == "civil_case":
+                    metadata = {
+                        "case_number": hit.case_number,
+                        "case_name": hit.case_name,
+                        "court": hit.court,
+                        "region": hit.region,
+                        "judgment_date": hit.judgment_date,
+                        "parties": hit.parties,
+                        "case_cause": hit.case_cause,
+                        "legal_basis": hit.legal_basis,
+                        "dates": hit.dates,
+                        "locations": hit.locations,
+                        "people": hit.people,
+                        "numbers": hit.numbers,
+                        "parties_llm": hit.parties_llm
+                    }
 
                 record = {
                     "score": score,
                     "title": hit.chunk_id,
-                    "content": content,
+                    "content": hit.chunk,
                     "metadata": metadata,
                 }
 

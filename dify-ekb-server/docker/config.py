@@ -43,8 +43,10 @@ MILVUS_CONFIG = {
 OTHER_CONFIG = {
     # 嵌入模型配置
     "embedding": {
-        "use_fp16": os.environ.get("USE_FP16", "false").lower() == "true",
-        "device": os.environ.get("DEVICE", "cpu")
+        "dense_embedding_base_url": os.environ.get("DENSE_EMBEDDING_BASE_URL", ""),
+        "dense_embedding_model": os.environ.get("DENSE_EMBEDDING_MODEL", ""),
+        "sparse_embedding_use_fp16": os.environ.get("SPARSE_EMBEDDING_USE_FP16", "false").lower() == "true",
+        "sparse_embedding_device": os.environ.get("SPARSE_EMBEDDING_DEVICE", "cpu"),
     },
     # 检索结果配置
     "result": {

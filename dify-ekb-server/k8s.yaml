@@ -66,23 +66,28 @@ spec:
             configMapKeyRef:
               name: dify-ekb-server-config
               key: hybrid_rrf_k
-        # 嵌入模型配置
-        - name: USE_FP16
+        # 密集嵌入模型配置
+        - name: DENSE_EMBEDDING_BASE_URL
           valueFrom:
             configMapKeyRef:
               name: dify-ekb-server-config
-              key: use_fp16
-        - name: DEVICE
+              key: dense_embedding_base_url
+        - name: DENSE_EMBEDDING_MODEL
           valueFrom:
             configMapKeyRef:
               name: dify-ekb-server-config
-              key: device
-        # 检索结果配置
-        - name: INCLUDE_METADATA
+              key: dense_embedding_model
+        # 稀疏嵌入模型配置
+        - name: SPARSE_EMBEDDING_USE_FP16
           valueFrom:
             configMapKeyRef:
               name: dify-ekb-server-config
-              key: include_metadata
+              key: sparse_embedding_use_fp16
+        - name: SPARSE_EMBEDDING_DEVICE
+          valueFrom:
+            configMapKeyRef:
+              name: dify-ekb-server-config
+              key: sparse_embedding_device
         # 调试模式
         - name: DEBUG_MODE
           valueFrom:
@@ -151,7 +156,7 @@ data:
   # Milvus连接配置
   milvus_host: "milvus-standalone"
   milvus_port: "19530"
-  
+
   # 检索模式
   search_mode: "hybrid"  # or "dense", "sparse"
   
@@ -166,18 +171,19 @@ data:
   # 混合检索配置（混合检索模式下采用）
   hybrid_rrf_k: "60"
   
-  # 嵌入模型配置
-  use_fp16: "false"
-  device: "gcu"
+  # 密集嵌入模型配置
+  dense_embedding_base_url: "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
+  dense_embedding_model: "Qwen3-Embedding-0.6B"
 
-  # 检索结果配置
-  include_metadata: "true"
+  # 稀疏嵌入模型配置
+  sparse_embedding_use_fp16: "false"
+  sparse_embedding_device: "gcu"
 
   # 调试模式
   debug_mode: "false"
 
   # 场景配置
-  scenario: "law"  # or "criminal-cases"
+  scenario: "law"  # or "criminal_case", "civil_case"
 
 ---
 apiVersion: v1

@@ -1,0 +1,1059 @@
+app:
+  description: ''
+  icon: ⚖️
+  icon_background: '#FFEAD5'
+  mode: advanced-chat
+  name: 法律助手（外部知识库）
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/openai_api_compatible:0.0.16@d41b09aca46cdd3876f70b4c91d464c4588fc0bdc844ced6ee426283ead6ce8e
+kind: app
+version: 0.3.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions: []
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - remote_url
+      - local_file
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 1
+    opening_statement: '您好，我是您的法律智能助手，专注于刑法领域的信息支持。
+
+
+      您可以通过以下方式使用：
+
+
+      1. 对话：与助手进行一般性对话。
+
+      2. 查询案例：查询刑法案例的案情描述和判决信息（需要增加“案例：”前缀）。
+
+      2. 查询法条：查询刑法的法律条文（需要增加“法条：”前缀）。'
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions:
+    - 刑法：抢劫
+    - 刑法：未成年人犯罪
+    - 民法典：结婚年龄
+    - 民法典：抵押权
+    - 刑事案件：燃放烟花爆竹引发森林火灾
+    - 民事案件：（2021）京01民终5327号
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: code
+      id: 17470323582560-source-1747033246486-target
+      selected: false
+      source: '17470323582560'
+      sourceHandle: source
+      target: '1747033246486'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: 1747033246486-source-1747032716728-target
+      selected: false
+      source: '1747033246486'
+      sourceHandle: source
+      target: '1747032716728'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: 17470343902300-source-17470347491360-target
+      selected: false
+      source: '17470343902300'
+      sourceHandle: source
+      target: '17470347491360'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: start
+        targetType: if-else
+      id: 1714456604511-source-1747372792101-target
+      selected: false
+      source: '1714456604511'
+      sourceHandle: source
+      target: '1747372792101'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: 1747372792101-false-17470343902300-target
+      selected: false
+      source: '1747372792101'
+      sourceHandle: 'false'
+      target: '17470343902300'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: code
+      id: 1747372792101-true-1747373305245-target
+      selected: false
+      source: '1747372792101'
+      sourceHandle: 'true'
+      target: '1747373305245'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: 1747373305245-source-17470323582560-target
+      selected: false
+      source: '1747373305245'
+      sourceHandle: source
+      target: '17470323582560'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: code
+      id: 1747372792101-acc47a23-5bbf-4c02-bc40-f1fae4527a9b-17476442132060-target
+      selected: false
+      source: '1747372792101'
+      sourceHandle: acc47a23-5bbf-4c02-bc40-f1fae4527a9b
+      target: '17476442132060'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: 17476442132060-source-17476442798000-target
+      selected: false
+      source: '17476442132060'
+      sourceHandle: source
+      target: '17476442798000'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: code
+      id: 17476442798000-source-17476442947240-target
+      selected: false
+      source: '17476442798000'
+      sourceHandle: source
+      target: '17476442947240'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: 17476442947240-source-17476443706710-target
+      selected: false
+      source: '17476442947240'
+      sourceHandle: source
+      target: '17476443706710'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: code
+      id: 1747372792101-37c2f03c-2aaa-44f9-9fca-ca672b43490b-17479036606150-target
+      selected: false
+      source: '1747372792101'
+      sourceHandle: 37c2f03c-2aaa-44f9-9fca-ca672b43490b
+      target: '17479036606150'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: 17479036606150-source-17479036892520-target
+      selected: false
+      source: '17479036606150'
+      sourceHandle: source
+      target: '17479036892520'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: code
+      id: 17479036892520-source-17479037137980-target
+      selected: false
+      source: '17479036892520'
+      sourceHandle: source
+      target: '17479037137980'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: 17479037137980-source-17479037231290-target
+      selected: false
+      source: '17479037137980'
+      sourceHandle: source
+      target: '17479037231290'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: 17513513340520-source-17513513506510-target
+      source: '17513513340520'
+      sourceHandle: source
+      target: '17513513506510'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: code
+      id: 17513513169630-source-17513513340520-target
+      source: '17513513169630'
+      sourceHandle: source
+      target: '17513513340520'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: code
+      id: 1747372792101-deddb6c9-294e-48dc-8a34-6dc7c4dcaeef-17513513136250-target
+      source: '1747372792101'
+      sourceHandle: deddb6c9-294e-48dc-8a34-6dc7c4dcaeef
+      target: '17513513136250'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: 17513513136250-source-17513513169630-target
+      source: '17513513136250'
+      sourceHandle: source
+      target: '17513513169630'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: 开始
+        type: start
+        variables: []
+      height: 53
+      id: '1714456604511'
+      position:
+        x: 30
+        y: 286.5
+      positionAbsolute:
+        x: 30
+        y: 286.5
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        dataset_ids:
+        - fu6L1UZDn7JgPN8lpeqkqhaXjrQr1sau4SgsFCAy52C1G1eEUXfqLhHY5d3674lU
+        desc: ''
+        metadata_filtering_mode: disabled
+        metadata_model_config:
+          completion_params:
+            enable_thinking: true
+            temperature: 0
+          mode: chat
+          name: Qwen3-32B
+          provider: langgenius/openai_api_compatible/openai_api_compatible
+        multiple_retrieval_config:
+          reranking_enable: false
+          reranking_mode: reranking_model
+          reranking_model:
+            model: bge-reranker-v2-m3
+            provider: langgenius/openai_api_compatible/openai_api_compatible
+          score_threshold: null
+          top_k: 5
+        query_variable_selector:
+        - '1747373305245'
+        - retrieval_query
+        retrieval_mode: multiple
+        selected: false
+        single_retrieval_config:
+          model:
+            completion_params: {}
+            mode: chat
+            name: Doubao-Pro-32k
+            provider: volcengine_maas
+        title: 检索刑事案件
+        type: knowledge-retrieval
+      height: 91
+      id: '17470323582560'
+      position:
+        x: 942
+        y: 530.703827809901
+      positionAbsolute:
+        x: 942
+        y: 530.703827809901
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '检索到如下案例：
+
+
+          {{#1747033246486.result#}}'
+        desc: ''
+        selected: false
+        title: 返回刑事案件信息
+        type: answer
+        variables: []
+      height: 121
+      id: '1747032716728'
+      position:
+        x: 1550
+        y: 554.5471040549522
+      positionAbsolute:
+        x: 1550
+        y: 554.5471040549522
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "def main(hits) -> dict:\n    formatted_cases = []\n    \n    for i,\
+          \ hit in enumerate(hits, 1):\n        doc_metadata = hit[\"metadata\"][\"\
+          doc_metadata\"]\n        \n        # 提取并处理字段\n        criminal = doc_metadata.get(\"\
+          criminals\", \"未知\")\n        accusation = doc_metadata.get(\"accusation\"\
+          , \"\")\n        accusations = \"、\".join(accusation.split(\"\\n\")) if\
+          \ accusation else \"未知\"\n        \n        articles = doc_metadata.get(\"\
+          relevant_articles\", [])\n        articles_str = \"、\".join(str(a) for a\
+          \ in articles) if articles else \"未知\"\n        \n        # 处理刑期\n     \
+          \   if doc_metadata.get(\"death_penalty\", False):\n            imprisonment_text\
+          \ = \"死刑\"\n        elif doc_metadata.get(\"life_imprisonment\", False):\n\
+          \            imprisonment_text = \"无期徒刑\"\n        else:\n            months\
+          \ = doc_metadata.get(\"imprisonment\", 0)\n            if months == -1:\n\
+          \                imprisonment_text = \"无期徒刑\"\n            elif months ==\
+          \ -2:\n                imprisonment_text = \"死刑\"\n            elif months\
+          \ > 12:\n                years, rem = divmod(months, 12)\n             \
+          \   imprisonment_text = f\"{years}年\" if rem == 0 else f\"{years}年{rem}个月\"\
+          \n            else:\n                imprisonment_text = f\"{months}个月\"\
+          \n        \n        # 处理罚金\n        money = doc_metadata.get(\"punish_of_money\"\
+          , 0)\n        money_text = f\"{money}元\" if money > 0 else \"无\"\n     \
+          \   \n        # 案情描述\n        case_text = hit.get(\"content\", \"\")\n \
+          \       \n        # 格式化输出\n        case_formatted = (\n            f\"**案例\
+          \ {i}**\\n\"\n            f\"罪犯：{criminal}\\n\"\n            f\"罪名：{accusations}\\\
+          n\"\n            f\"相关法条：{articles_str}\\n\"\n            f\"刑期：{imprisonment_text}\\\
+          n\"\n            f\"罚金：{money_text}\\n\"\n            f\"案情描述：\\n{case_text}\"\
+          \n        )\n        \n        formatted_cases.append(case_formatted)\n\
+          \    \n    return {\"result\": \"\\n\\n\".join(formatted_cases)}"
+        code_language: python3
+        desc: ''
+        outputs:
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 排版刑事案件信息
+        type: code
+        variables:
+        - value_selector:
+          - '17470323582560'
+          - result
+          variable: hits
+      height: 53
+      id: '1747033246486'
+      position:
+        x: 1246
+        y: 530.703827809901
+      positionAbsolute:
+        x: 1246
+        y: 530.703827809901
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+            size: 50
+        model:
+          completion_params:
+            enable_thinking: true
+            temperature: 0
+          mode: chat
+          name: Qwen3-32B
+          provider: langgenius/openai_api_compatible/openai_api_compatible
+        prompt_template:
+        - id: 8dfbe783-52f1-4210-9899-e952da5ed717
+          role: system
+          text: 你是一名法律智能助手，擅长根据提供的法律条文或裁判文书上下文，准确、简明地回答用户提出的法律问题。你的回答应基于上下文信息，条理清晰、专业可靠，避免主观臆断，不可凭空编造。涉及法律条文的，检索法律向量数据库，结合法条原文进行回答，使用
+            Markdown 的引用格式（行增加前缀 >）引用法条原文；涉及法律案件的，检索案件向量数据库，返回相应的案件信息，或结合案件信息上下文进行回答；涉及人名、地名、专有名词、日期、数额的，必须准确地检索，不得返回相似但不同的结果。注意中文的标点符号为全角符号。
+        selected: false
+        title: 生成一般回复
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 89
+      id: '17470343902300'
+      position:
+        x: 638
+        y: 764.4678790424153
+      positionAbsolute:
+        x: 638
+        y: 764.4678790424153
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '{{#17470343902300.text#}}'
+        desc: ''
+        selected: false
+        title: 返回一般回复
+        type: answer
+        variables: []
+      height: 105
+      id: '17470347491360'
+      position:
+        x: 942
+        y: 764.4678790424153
+      positionAbsolute:
+        x: 942
+        y: 764.4678790424153
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        cases:
+        - case_id: acc47a23-5bbf-4c02-bc40-f1fae4527a9b
+          conditions:
+          - comparison_operator: contains
+            id: d20d2c41-fa37-44e6-9028-ca97975939ed
+            value: 刑法：
+            varType: string
+            variable_selector:
+            - sys
+            - query
+          id: acc47a23-5bbf-4c02-bc40-f1fae4527a9b
+          logical_operator: and
+        - case_id: 37c2f03c-2aaa-44f9-9fca-ca672b43490b
+          conditions:
+          - comparison_operator: contains
+            id: 0bf5a82d-703b-425d-8c37-bc158a8ac3b7
+            value: 民法：
+            varType: string
+            variable_selector:
+            - sys
+            - query
+          - comparison_operator: contains
+            id: 4dd5df05-54b3-4c75-b420-1c3b4a4f9cf8
+            value: 民法典：
+            varType: string
+            variable_selector:
+            - sys
+            - query
+          id: 37c2f03c-2aaa-44f9-9fca-ca672b43490b
+          logical_operator: or
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: contains
+            id: b32e84b0-80fd-4523-8298-6a108969cfa5
+            value: 刑事案件：
+            varType: string
+            variable_selector:
+            - sys
+            - query
+          id: 'true'
+          logical_operator: or
+        - case_id: deddb6c9-294e-48dc-8a34-6dc7c4dcaeef
+          conditions:
+          - comparison_operator: contains
+            id: fb2329bb-4da8-4ec1-b747-78fc94976ab9
+            value: 民事案件：
+            varType: string
+            variable_selector:
+            - sys
+            - query
+          id: deddb6c9-294e-48dc-8a34-6dc7c4dcaeef
+          logical_operator: and
+        desc: ''
+        selected: false
+        title: 条件分支
+        type: if-else
+      height: 295
+      id: '1747372792101'
+      position:
+        x: 334
+        y: 286.5
+      positionAbsolute:
+        x: 334
+        y: 286.5
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "\ndef main(query: str) -> dict:\n    return {\n        \"retrieval_query\"\
+          : query.lstrip(\"刑事案件：\")\n    }\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          retrieval_query:
+            children: null
+            type: string
+        selected: false
+        title: 移除前缀“刑事案件：”
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          variable: query
+      height: 53
+      id: '1747373305245'
+      position:
+        x: 638
+        y: 530.703827809901
+      positionAbsolute:
+        x: 638
+        y: 530.703827809901
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        author: t9k
+        desc: ''
+        height: 103
+        selected: false
+        showAuthor: true
+        text: '{"root":{"children":[{"children":[{"detail":0,"format":4,"mode":"normal","style":"font-size:
+          16px;","text":"意图识别","type":"text","version":1}],"direction":"ltr","format":"","indent":0,"type":"paragraph","version":1,"textFormat":4,"textStyle":"font-size:
+          16px;"},{"children":[{"detail":0,"format":0,"mode":"normal","style":"font-size:
+          16px;","text":"条件分支","type":"text","version":1}],"direction":"ltr","format":"","indent":0,"type":"paragraph","version":1,"textStyle":"font-size:
+          16px;","textFormat":0}],"direction":"ltr","format":"","indent":0,"type":"root","version":1,"textFormat":4,"textStyle":"font-size:
+          16px;"}}'
+        theme: blue
+        title: ''
+        type: ''
+        width: 240
+      height: 103
+      id: '1747374462345'
+      position:
+        x: 334
+        y: 70.80353180222622
+      positionAbsolute:
+        x: 334
+        y: 70.80353180222622
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-note
+      width: 240
+    - data:
+        code: "\ndef main(query: str) -> dict:\n    return {\n        \"retrieval_query\"\
+          : query.lstrip(\"刑法：\")\n    }\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          retrieval_query:
+            children: null
+            type: string
+        selected: false
+        title: '移除前缀“刑法：” '
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          variable: query
+      height: 53
+      id: '17476442132060'
+      position:
+        x: 638
+        y: 286.5
+      positionAbsolute:
+        x: 638
+        y: 286.5
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        dataset_ids:
+        - uLVgUd2gHppdIFwNDbByR5qVQFjF3L7R6aoIpmC0lFKLvOwmcrNr9kBB8ehJeTCt
+        desc: ''
+        metadata_filtering_mode: disabled
+        metadata_model_config:
+          completion_params:
+            enable_thinking: true
+            temperature: 0
+          mode: chat
+          name: Qwen3-32B
+          provider: langgenius/openai_api_compatible/openai_api_compatible
+        multiple_retrieval_config:
+          reranking_enable: false
+          reranking_mode: reranking_model
+          reranking_model:
+            model: bge-reranker-v2-m3
+            provider: langgenius/openai_api_compatible/openai_api_compatible
+          score_threshold: null
+          top_k: 5
+        query_variable_selector:
+        - '17476442132060'
+        - retrieval_query
+        retrieval_mode: multiple
+        selected: false
+        single_retrieval_config:
+          model:
+            completion_params: {}
+            mode: chat
+            name: Doubao-Pro-32k
+            provider: volcengine_maas
+        title: 检索刑法
+        type: knowledge-retrieval
+      height: 91
+      id: '17476442798000'
+      position:
+        x: 942
+        y: 286.5
+      positionAbsolute:
+        x: 942
+        y: 286.5
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "def main(hits) -> dict:\n    formatted_provisions = []\n\n    for i,\
+          \ hit in enumerate(hits, 1):\n        doc_metadata = hit[\"metadata\"][\"\
+          doc_metadata\"]\n\n        law = doc_metadata.get(\"law\", \"未知法律\")\n \
+          \       part = doc_metadata.get(\"part\", \"未知编\")\n        chapter = doc_metadata.get(\"\
+          chapter\", \"未知章\")\n        section = doc_metadata.get(\"section\", \"\"\
+          )\n        article = doc_metadata.get(\"article\", 0)\n        article_amended\
+          \ = doc_metadata.get(\"article_amended\", 0)\n        \n        # 构建修正条目信息\n\
+          \        amended_info = \"\"\n        if article_amended != 0:\n       \
+          \     amended_info = f\"修正条目：第{article_amended}条\\n\"\n\n        provision_text\
+          \ = hit.get(\"content\", \"\").strip()\n\n        # 构建格式化字符串\n        provision_formatted\
+          \ = f\"**法律条文 {i}**\\n{law}\\n{part}\\n{chapter}\\n\"\n        \n      \
+          \  if section:\n            provision_formatted += f\"{section}\\n\"\n \
+          \       \n        # 添加修正条目（如果存在）\n        if amended_info:\n           \
+          \ provision_formatted += f\"{amended_info}\"\n            \n        provision_formatted\
+          \ += f\"\\n{provision_text}\"\n\n        formatted_provisions.append(provision_formatted)\n\
+          \n    return {\"result\": \"\\n\\n\".join(formatted_provisions)}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 排版刑法法条信息
+        type: code
+        variables:
+        - value_selector:
+          - '17476442798000'
+          - result
+          variable: hits
+      height: 53
+      id: '17476442947240'
+      position:
+        x: 1246
+        y: 286.5
+      positionAbsolute:
+        x: 1246
+        y: 286.5
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '检索到如下法条：
+
+
+          {{#17476442947240.result#}}'
+        desc: ''
+        selected: false
+        title: 返回刑法法条信息
+        type: answer
+        variables: []
+      height: 121
+      id: '17476443706710'
+      position:
+        x: 1550
+        y: 286.5
+      positionAbsolute:
+        x: 1550
+        y: 286.5
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "\ndef main(query: str) -> dict:\n    return {\n        \"retrieval_query\"\
+          : query.lstrip(\"民法：\").lstrip(\"民法典：\")\n    }\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          retrieval_query:
+            children: null
+            type: string
+        selected: false
+        title: '移除前缀“民法：” '
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          variable: query
+      height: 53
+      id: '17479036606150'
+      position:
+        x: 642.3409184686373
+        y: 395.0501256649832
+      positionAbsolute:
+        x: 642.3409184686373
+        y: 395.0501256649832
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        dataset_ids:
+        - j+Sg8RAeESt5+nFA7J8Kyhz92jTmGxXwOMMdWfUNgqgxfohrIHT8cc86XzS3Z16Z
+        desc: ''
+        metadata_filtering_mode: disabled
+        metadata_model_config:
+          completion_params:
+            enable_thinking: true
+            temperature: 0
+          mode: chat
+          name: Qwen3-32B
+          provider: langgenius/openai_api_compatible/openai_api_compatible
+        multiple_retrieval_config:
+          reranking_enable: false
+          reranking_mode: reranking_model
+          reranking_model:
+            model: bge-reranker-v2-m3
+            provider: langgenius/openai_api_compatible/openai_api_compatible
+          score_threshold: null
+          top_k: 5
+        query_variable_selector:
+        - '17479036606150'
+        - retrieval_query
+        retrieval_mode: multiple
+        selected: false
+        single_retrieval_config:
+          model:
+            completion_params: {}
+            mode: chat
+            name: Doubao-Pro-32k
+            provider: volcengine_maas
+        title: 检索民法典
+        type: knowledge-retrieval
+      height: 91
+      id: '17479036892520'
+      position:
+        x: 942
+        y: 395.0501256649832
+      positionAbsolute:
+        x: 942
+        y: 395.0501256649832
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "def main(hits) -> dict:\n    formatted_provisions = []\n\n    for i,\
+          \ hit in enumerate(hits, 1):\n        doc_metadata = hit[\"metadata\"][\"\
+          doc_metadata\"]\n\n        law = doc_metadata.get(\"law\", \"未知法律\")\n \
+          \       part = doc_metadata.get(\"part\", \"未知编\")\n        chapter = doc_metadata.get(\"\
+          chapter\", \"未知章\")\n        section = doc_metadata.get(\"section\", \"\"\
+          )\n        article = doc_metadata.get(\"article\", 0)\n\n        provision_text\
+          \ = hit.get(\"content\", \"\").strip()\n\n        # 构建格式化字符串\n        provision_formatted\
+          \ = f\"**法律条文 {i}**\\n{law}\\n{part}\\n{chapter}\\n\"\n\n        if section:\n\
+          \            provision_formatted += f\"{section}\\n\"\n\n        provision_formatted\
+          \ += f\"\\n\\n{provision_text}\"\n\n        formatted_provisions.append(provision_formatted)\n\
+          \n    return {\"result\": \"\\n\\n\".join(formatted_provisions)}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 排版民法典法条信息
+        type: code
+        variables:
+        - value_selector:
+          - '17479036892520'
+          - result
+          variable: hits
+      height: 53
+      id: '17479037137980'
+      position:
+        x: 1246
+        y: 395.0501256649832
+      positionAbsolute:
+        x: 1246
+        y: 395.0501256649832
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '检索到如下法条：
+
+
+          {{#17479037137980.result#}}'
+        desc: ''
+        selected: false
+        title: 返回民法典法条信息
+        type: answer
+        variables: []
+      height: 121
+      id: '17479037231290'
+      position:
+        x: 1550
+        y: 420.9820804814111
+      positionAbsolute:
+        x: 1550
+        y: 420.9820804814111
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "\ndef main(query: str) -> dict:\n    return {\n        \"retrieval_query\"\
+          : query.lstrip(\"民事案件：\")\n    }\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          retrieval_query:
+            children: null
+            type: string
+        selected: false
+        title: 移除前缀“民事案件：”
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          variable: query
+      height: 53
+      id: '17513513136250'
+      position:
+        x: 642.3409184686373
+        y: 659.9566673483195
+      positionAbsolute:
+        x: 642.3409184686373
+        y: 659.9566673483195
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        dataset_ids:
+        - M7WSBvyd4a/d8RbFXy8maJ/8eXR9rOxoADlcQKRmFmuPZ4GFPjUWRNDSiq1/j+LF
+        desc: ''
+        metadata_filtering_mode: disabled
+        metadata_model_config:
+          completion_params:
+            enable_thinking: true
+            temperature: 0
+          mode: chat
+          name: Qwen3-32B
+          provider: langgenius/openai_api_compatible/openai_api_compatible
+        multiple_retrieval_config:
+          reranking_enable: false
+          reranking_mode: reranking_model
+          reranking_model:
+            model: bge-reranker-v2-m3
+            provider: langgenius/openai_api_compatible/openai_api_compatible
+          score_threshold: null
+          top_k: 5
+        query_variable_selector:
+        - '17513513136250'
+        - retrieval_query
+        retrieval_mode: multiple
+        selected: false
+        single_retrieval_config:
+          model:
+            completion_params: {}
+            mode: chat
+            name: Doubao-Pro-32k
+            provider: volcengine_maas
+        title: 检索民事案件
+        type: knowledge-retrieval
+      height: 91
+      id: '17513513169630'
+      position:
+        x: 936.6470197300578
+        y: 659.9566673483195
+      positionAbsolute:
+        x: 936.6470197300578
+        y: 659.9566673483195
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "def main(hits) -> dict:\n    formatted_cases = []\n    \n    for i,\
+          \ hit in enumerate(hits, 1):\n        doc_metadata = hit[\"metadata\"][\"\
+          doc_metadata\"]\n        \n        # 提取字段（使用安全默认值）\n        case_number\
+          \ = doc_metadata.get(\"case_number\", \"未知案号\")\n        case_name = doc_metadata.get(\"\
+          case_name\", \"未知案件名称\")\n        court = doc_metadata.get(\"court\", \"\
+          未知法院\")\n        parties = doc_metadata.get(\"parties\", \"未知当事人\")\n  \
+          \      judgment_date = doc_metadata.get(\"judgment_date\", \"未知日期\")\n \
+          \       case_cause = doc_metadata.get(\"case_cause\", \"未知案由\")\n      \
+          \  content = hit.get(\"content\", \"\").strip()\n        \n        # 格式化案例展示\n\
+          \        case_formatted = (\n            f\"**案例 {i}**\\n\"\n          \
+          \  f\"案号：{case_number}\\n\"\n            f\"案件名称：{case_name}\\n\"\n    \
+          \        f\"法院：{court}\\n\"\n            f\"当事人：{parties}\\n\"\n       \
+          \     f\"裁判日期：{judgment_date}\\n\"\n            f\"案由：{case_cause}\\n\"\n\
+          \            f\"裁判文书片段：\\n{content}\"\n        )\n        \n        formatted_cases.append(case_formatted)\n\
+          \    \n    return {\"result\": \"\\n\\n\".join(formatted_cases)}"
+        code_language: python3
+        desc: ''
+        outputs:
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 排版民事案件信息
+        type: code
+        variables:
+        - value_selector:
+          - '17513513169630'
+          - result
+          variable: hits
+      height: 53
+      id: '17513513340520'
+      position:
+        x: 1246
+        y: 659.9566673483195
+      positionAbsolute:
+        x: 1246
+        y: 659.9566673483195
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '检索到如下案例：
+
+
+          {{#17513513340520.result#}}'
+        desc: ''
+        selected: false
+        title: 返回民事案件信息
+        type: answer
+        variables: []
+      height: 121
+      id: '17513513506510'
+      position:
+        x: 1550
+        y: 692.1456604440696
+      positionAbsolute:
+        x: 1550
+        y: 692.1456604440696
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: -17.569494450911407
+      y: 177.74158686553216
+      zoom: 0.7124738940979634
