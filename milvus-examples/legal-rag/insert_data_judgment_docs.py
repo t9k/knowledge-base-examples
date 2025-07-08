@@ -147,7 +147,7 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=overlap,
-        separators=["\r\n", "\n", "。", "；", "，", "、"],
+        separators=["\r\n", "\n", "。", "；", "，", "、", "："],
         keep_separator="end")
     return text_splitter.split_text(text)
 
@@ -316,6 +316,18 @@ def extract_metadata_with_llm(chunk, client):
             field_name, data = future.result()
             results[field_name] = data
 
+    if len(results["locations"]) > 200:
+        results["locations"] = "<none>"
+
+    if len(results["people"]) > 500:
+        results["people"] = "<none>"
+
+    if len(results["numbers"]) > 400:
+        results["numbers"] = "<none>"
+
+    if len(results["parties_llm"]) > 200:
+        results["parties_llm"] = "<none>"
+
     return results
 
 
@@ -385,8 +397,8 @@ def setup_milvus_collection(dense_dim):
             FieldSchema(name="dates", dtype=DataType.VARCHAR, max_length=700),
             FieldSchema(name="locations",
                         dtype=DataType.VARCHAR,
-                        max_length=500),
-            FieldSchema(name="people", dtype=DataType.VARCHAR, max_length=900),
+                        max_length=600),
+            FieldSchema(name="people", dtype=DataType.VARCHAR, max_length=1500),
             FieldSchema(name="numbers", dtype=DataType.VARCHAR,
                         max_length=500),
             FieldSchema(name="parties_llm",
@@ -445,7 +457,7 @@ def record_generator(csv_path, chunksize):
         court = item["法院"]
         region = get_metadata("所属地区")
         judgment_date = "{}年{}月{}日".format(*map(int, item["裁判日期"].split("-")))
-        parties = item["当事人"].replace("；", "\n")
+        parties = get_metadata("当事人").replace("；", "\n")
         case_cause = get_metadata("案由")
         legal_basis = parse_legal_basis(item["法律依据"])
 

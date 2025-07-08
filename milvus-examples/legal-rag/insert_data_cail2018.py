@@ -215,10 +215,7 @@ def extract_metadata_with_llm(chunk, client):
             results[field_name] = data
 
         if len(results["locations"]) > 200:
-            print(111)
-            print(chunk)
-            print(results["locations"])
-            print(111)
+            results["locations"] = "<none>"
 
     return results
 
@@ -289,14 +286,14 @@ def setup_milvus_collection(dense_dim):
             FieldSchema(name="dates", dtype=DataType.VARCHAR, max_length=300),
             FieldSchema(name="locations",
                         dtype=DataType.VARCHAR,
-                        max_length=700),
+                        max_length=600),
             FieldSchema(name="people", dtype=DataType.VARCHAR,
-                        max_length=1100),
+                        max_length=1800),
             FieldSchema(name="numbers", dtype=DataType.VARCHAR,
-                        max_length=400),
+                        max_length=500),
             FieldSchema(name="criminals_llm",
                         dtype=DataType.VARCHAR,
-                        max_length=300)
+                        max_length=600)
         ])
     schema = CollectionSchema(fields)
     if utility.has_collection(COLLECTION_NAME):

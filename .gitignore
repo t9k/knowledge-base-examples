@@ -12,3 +12,6 @@ local-test
 
 # Python generated files
 *.egg-info/
+
+# Python cache
+__pycache__/
