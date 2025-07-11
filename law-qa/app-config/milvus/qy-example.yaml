@@ -1,0 +1,184 @@
+cluster:
+  enabled: true
+
+image:
+  registry: "$(T9K_APP_IMAGE_REGISTRY)"
+  repository: "$(T9K_APP_IMAGE_NAMESPACE)/milvus"
+  tag: "v2.5.4"
+  pullPolicy: IfNotPresent
+
+extraConfigFiles:
+  user.yaml: |+
+    common:
+      security:
+        authorizationEnabled: true
+        superUsers: root
+
+queryNode:
+  replicas: 4
+  resources:
+    limits:
+      cpu: 4
+      memory: 16Gi
+
+indexNode:
+  replicas: 2
+  resources:
+    limits:
+      cpu: 4
+      memory: 16Gi
+
+dataNode:
+  replicas: 1
+  resources:
+    limits:
+      cpu: 2
+      memory: 8Gi
+
+mixCoordinator:
+  replicas: 1
+  resources:
+    limits:
+      cpu: 2
+      memory: 8Gi
+
+proxy:
+  replicas: 1
+  resources:
+    limits:
+      cpu: 2
+      memory: 8Gi
+
+minio:
+  enabled: true
+  name: minio
+  mode: distributed
+  image:
+    registry: "$(T9K_APP_IMAGE_REGISTRY)"
+    repository: "$(T9K_APP_IMAGE_NAMESPACE)/minio"
+    tag: "RELEASE.2023-03-20T20-16-18Z"
+    pullPolicy: IfNotPresent
+  replicas: 4
+  accessKey: minioadmin
+  secretKey: minioadmin
+  existingSecret: ""
+  bucketName: "milvus-bucket"
+  rootPath: file
+  useIAM: false
+  iamEndpoint: ""
+  region: ""
+  useVirtualHost: false
+  podDisruptionBudget:
+    enabled: false
+  resources:
+    requests:
+      cpu: 1
+      memory: 8Gi
+  service:
+    type: ClusterIP
+    port: 9000
+  persistence:
+    enabled: true
+    existingClaim: ""
+    storageClass:
+    accessMode: ReadWriteOnce
+    size: 200Gi
+
+etcd:
+  enabled: true
+  name: etcd
+  replicaCount: 3
+  pdb:
+    create: false
+  image:
+    registry: "$(T9K_APP_IMAGE_REGISTRY)"
+    repository: "$(T9K_APP_IMAGE_NAMESPACE)/etcd"
+    tag: "3.5.16-r1"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 2379
+    peerPort: 2380
+  auth:
+    rbac:
+      enabled: false
+  persistence:
+    enabled: true
+    storageClass:
+    accessMode: ReadWriteOnce
+    size: 20Gi
+  resources:
+    limits:
+      cpu: 1
+      memory: 4Gi
+  livenessProbe:
+    enabled: true
+    timeoutSeconds: 10
+  readinessProbe:
+    enabled: true
+    periodSeconds: 20
+    timeoutSeconds: 10
+  autoCompactionMode: revision
+  autoCompactionRetention: "1000"
+  extraEnvVars:
+    - name: ETCD_QUOTA_BACKEND_BYTES
+      value: "4294967296"
+    - name: ETCD_HEARTBEAT_INTERVAL
+      value: "500"
+    - name: ETCD_ELECTION_TIMEOUT
+      value: "2500"
+
+pulsarv3:
+  enabled: true
+  persistence: true
+  components:
+    zookeeper: true
+    bookkeeper: true
+    autorecovery: true
+    broker: true
+    functions: false
+    proxy: true
+    toolset: false
+    pulsar_manager: false
+  image:
+    registry: "$(T9K_APP_IMAGE_REGISTRY)"
+    repository: "$(T9K_APP_IMAGE_NAMESPACE)/pulsar"
+    tag: 3.0.7
+  bookkeeper:
+    replicaCount: 3
+    resources:
+      requests:
+        memory: 8Gi
+        cpu: 1
+    volumes:
+      persistence: true
+      journal:
+        name: journal
+        size: 50Gi
+      ledgers:
+        name: ledgers
+        size: 100Gi
+  broker:
+    replicaCount: 2
+    resources:
+      requests:
+        memory: 4Gi
+        cpu: 1
+  proxy:
+    replicaCount: 2
+    resources:
+      requests:
+        memory: 4Gi
+        cpu: 0.5
+  zookeeper:
+    replicaCount: 3
+    resources:
+      requests:
+        memory: 2Gi
+        cpu: 0.5
+    volumes:
+      persistence: true
+      data:
+        name: data
+        size: 50Gi
+        local_storage: false

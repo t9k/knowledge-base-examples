@@ -1,0 +1,46 @@
+server:
+  image:
+    registry: "registry.qy.t9kcloud.cn"
+    repository: "topsrider/vllm-openai"
+    tag: "20250516"
+    pullPolicy: Always
+
+  resources:
+    limits:
+      cpu: 4
+      memory: 64Gi
+      enflame.com/gcu: 2
+
+  model:
+    deployName: "Qwen3-32B"
+    volume:
+      storageClass: ""
+      size: 32Gi
+      accessModes:
+        - ReadWriteOnce
+      existingClaim: "llm"
+      subPath: "Qwen3-32B"
+
+  autoScaling:
+    minReplicas: 1
+    maxReplicas: 1
+    annotations: {}
+
+  app:
+    extraArgs:
+      - "--gpu-memory-utilization=0.95"
+      - "--tensor-parallel-size=2"
+      - "--max-model-len=8192"
+
+  env: []
+  extraVolumeMounts: []
+  extraVolume: []
+  securityContext: {}
+  nodeSelector: {}
+
+initializer:
+  image:
+    registry: "$(T9K_APP_IMAGE_REGISTRY)"
+    repository: "$(T9K_APP_IMAGE_NAMESPACE)/kubectl"
+    tag: "1.27"
+    pullPolicy: IfNotPresent
