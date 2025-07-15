@@ -22,10 +22,15 @@ if enable_auth:
     key_pair = RSAKeyPair.generate()
     auth = BearerAuthProvider(public_key=key_pair.public_key)
     token = key_pair.create_token(expires_in_seconds=86400 * 30)
-    mcp = FastMCP(name="Reranker", auth=auth)
+    mcp = FastMCP(name="Reranker",
+                  auth=auth,
+                  sse_path="/mcp/reranker-sse/sse",
+                  message_path="/mcp/reranker-sse/message/")
     logger.info("Authentication enabled")
 else:
-    mcp = FastMCP(name="Reranker")
+    mcp = FastMCP(name="Reranker",
+                  sse_path="/mcp/reranker-sse/sse",
+                  message_path="/mcp/reranker-sse/message/")
     logger.info("Authentication disabled")
 
 

@@ -520,10 +520,17 @@ if enable_auth:
     key_pair = RSAKeyPair.generate()
     auth = BearerAuthProvider(public_key=key_pair.public_key)
     token = key_pair.create_token(expires_in_seconds=86400 * 30)
-    mcp = FastMCP(name="Case Searcher", lifespan=server_lifespan, auth=auth)
+    mcp = FastMCP(name="Case Searcher",
+                  lifespan=server_lifespan,
+                  auth=auth,
+                  sse_path="/mcp/case-searcher-sse/sse",
+                  message_path="/mcp/case-searcher-sse/message/")
     logger.info("Authentication enabled")
 else:
-    mcp = FastMCP(name="Case Searcher", lifespan=server_lifespan)
+    mcp = FastMCP(name="Case Searcher",
+                  lifespan=server_lifespan,
+                  sse_path="/mcp/case-searcher-sse/sse",
+                  message_path="/mcp/case-searcher-sse/message/")
     logger.info("Authentication disabled")
 
 

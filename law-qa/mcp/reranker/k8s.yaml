@@ -19,9 +19,8 @@ spec:
     spec:
       containers:
       - name: mcp-server-reranker
-        image: registry.qy.t9kcloud.cn/topsrider/mcp-server:reranker-20250701
+        image: registry.qy.t9kcloud.cn/topsrider/mcp-server:reranker-20250716
         imagePullPolicy: Always
-        # args: ["--sse"]
         ports:
         - containerPort: 8000
           name: http

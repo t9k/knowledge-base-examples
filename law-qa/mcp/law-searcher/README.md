@@ -16,6 +16,21 @@
 - 支持 sse 和 streamable-http 传输模式
 - 可配置的身份认证（JWT Bearer Token）
 
+### 传输模式
+
+#### HTTP 模式 (streamable-http)
+- **特点**: 传统的 HTTP 请求/响应模式
+- **适用场景**: 标准的 MCP 客户端集成
+- **路径**: `/mcp/law-searcher/`
+
+#### SSE 模式 (Server-Sent Events)
+- **特点**: 实时双向流式通信
+- **适用场景**: 需要实时交互的应用
+- **路径**: `/mcp/law-searcher-sse/`
+- **端点**: 
+  - SSE 连接：`/mcp/law-searcher-sse/sse`
+  - 消息发送：`/mcp/law-searcher-sse/message`
+
 ### 身份认证
 
 当 `ENABLE_AUTH=true` 时，服务器会启用JWT Bearer Token认证：
@@ -29,10 +44,20 @@
 
 ### 在 Kubernetes 部署
 
+服务提供两种部署模式：
+
+#### HTTP 模式部署
 修改 `k8s.yaml` 中的 ConfigMap 和 VirtualService 配置，然后执行以下命令进行部署：
 
 ```bash
 kubectl apply -f k8s.yaml
+```
+
+#### SSE 模式部署
+修改 `k8s-sse.yaml` 中的 ConfigMap 和 VirtualService 配置，然后执行以下命令进行部署：
+
+```bash
+kubectl apply -f k8s-sse.yaml
 ```
 
 ### 在本地部署
@@ -59,11 +84,11 @@ ENABLE_AUTH=false
 3. 启动服务：
 
 ```bash
-# 启动 sse 模式
-python server.py --sse
-
-# 启动 streamable-http 模式
+# 启动 HTTP 模式 (streamable-http)
 python server.py
+
+# 启动 SSE 模式 (Server-Sent Events)
+python server.py --sse
 ```
 
 ## 混合检索支持

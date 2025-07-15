@@ -19,9 +19,8 @@ spec:
     spec:
       containers:
       - name: mcp-server-case-searcher
-        image: registry.qy.t9kcloud.cn/topsrider/mcp-server:case-searcher-20250701
+        image: registry.qy.t9kcloud.cn/topsrider/mcp-server:case-searcher-20250716
         imagePullPolicy: Always
-        # args: ["--sse"]
         ports:
         - containerPort: 8000
           name: http
