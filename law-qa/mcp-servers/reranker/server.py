@@ -43,7 +43,7 @@ async def rerank(
         Field(description="Number of top results to return", ge=1, le=20)] = 5,
     ctx: Context = None,
 ) -> str:
-    """根据查询文本对文档列表进行重排序。适用于检索结果较多、较复杂的情况。
+    """对检索结果进行重排序。适用于检索结果较多、需要高 precision 的情况。
     
     注意：
 

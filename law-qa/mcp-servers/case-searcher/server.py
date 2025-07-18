@@ -739,7 +739,7 @@ async def criminal_case_hybrid_search(
     - numbers (VARCHAR): 数额
         示例：'numbers like "%16.8万元%"'
     - criminals_llm (VARCHAR): 犯罪人（通过 LLM 提取）
-    
+
     注意：
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。

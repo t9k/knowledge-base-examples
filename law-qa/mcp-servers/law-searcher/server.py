@@ -287,7 +287,7 @@ else:
 
 @mcp.resource("data://criminal-law-contents")
 async def criminal_law_contents() -> str:
-    """民法典的目录，用于参考。"""
+    """刑法的目录。作为构建与编、章、节相关的过滤表达式时的参考。"""
 
     return """第一编 总则  
   第一章 刑法的任务、基本原则和适用范围  
@@ -510,7 +510,7 @@ async def criminal_law_hybrid_search(
     - article_amended (INT64): 所修改的刑法中的条（仅适用于刑法修正案）
 
     注意：
-  
+
     1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
     "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
     """
@@ -532,7 +532,7 @@ async def criminal_law_hybrid_search(
 
 @mcp.resource("data://civil-code-contents")
 async def civil_code_contents() -> str:
-    """民法典的目录，用于参考。"""
+    """民法典的目录。作为构建与编、章、节相关的过滤表达式时的参考。"""
 
     return """第一编 总则
   第一章 基本规定
