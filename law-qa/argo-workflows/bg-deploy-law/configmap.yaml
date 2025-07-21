@@ -1,9 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: bg-deploy-criminal-cases-config
+  name: bg-deploy-law-config
 data:
   env.properties: |
-    COLLECTION_NAME="criminal_cases"
     MILVUS_URI="http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
     MILVUS_TOKEN="root:Milvus"
+    EMBEDDING_BASE_URL="http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
+    EMBEDDING_MODEL="Qwen3-Embedding-0.6B"

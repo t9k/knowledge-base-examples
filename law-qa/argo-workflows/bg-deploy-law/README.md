@@ -1,48 +1,50 @@
-# 蓝绿部署工作流（刑法案例）
+# 蓝绿部署工作流（法律）
 
-本工作流使用 Argo Workflows、Milvus 和嵌入模型实现[刑法案例数据](https://github.com/china-ai-law-challenge/CAIL2018)的蓝绿部署流程。
+本工作流使用 Argo Workflows、Milvus 和嵌入模型实现[法律数据](https://modelsphere.nc201.t9kcloud.cn/datasets/xyx/cn-laws)的蓝绿部署流程。
 
 ## 概述
 
 工作流执行以下步骤：
 
 1. **准备（prepare）**：检查参数格式，拉取后续步骤要执行的脚本
-2. **下载文件（download）**：从互联网下载刑法案例数据文件并解压
-3. **插入数据（db-insert）**：创建新的 Milvus Database，以及其下的一个 Collection；处理案例数据文件：逐行处理，分块、提取元数据、创建嵌入向量，并将数据插入到 Database 下的 Collection 中
+2. **下载文件（download）**：从 Model Sphere 下载刑事案件数据文件
+3. **插入数据（db_insert）**：创建新的 Milvus Database，以及其下的两个 Collection；处理案例数据文件：按 Markdown 标题和法条分段、提取元数据、创建嵌入向量，并将数据插入到 Database 下的 Collection 中
 
 ## 文件说明
 
 - `bg-deploy-template.yaml`：Argo WorkflowTemplate 定义
 - `configmap.yaml`：配置工作流的 ConfigMap
 - `pvc.yaml`：工作空间存储的 PersistentVolumeClaim
-- `download.sh`：从互联网下载刑法案例数据文件并解压的脚本
-- `db-insert.py`：创建 Milvus Database 及其下的 Collection，处理案例数据文件并插入数据到 Collection 的 Python 脚本
+- `download.sh`：从 Model Sphere 下载法律数据文件的脚本
+- `db_insert.py`：创建 Milvus Database 及其下的 Collection，处理法律数据文件并插入数据到 Collection 的 Python 脚本
 
 ## 配置说明
 
 工作流需要以下参数：
 
 - `database-name`：Milvus Database 名称
+- `collection-name`：Milvus Collection 名称
 
-ConfigMap bg-deploy-criminal-cases-config 包含以下环境变量：
+ConfigMap bg-deploy-law-config 包含以下环境变量：
 
-- `COLLECTION_NAME`：集合名称（固定名称，创建在指定 Database 中）
 - `MILVUS_URI`：Milvus 连接 URI
 - `MILVUS_TOKEN`：Milvus 连接令牌
+- `EMBEDDING_BASE_URL`：嵌入模型连接 URL
+- `EMBEDDING_MODEL`：嵌入模型名称
 
 ## 数据处理
 
-- 使用 RecursiveCharacterTextSplitter 分块，保持结构完整性的同时避免单个 chunk 过长
-- 使用 Enflame GCU 推理 bge-m3 模型生成嵌入向量
-- 将已有的元数据存入到 Collection 中，供后续元数据过滤使用
+- 进行两级 chunking：使用 MarkdownHeaderTextSplitter 基于 Markdown 标题进行 chunking，再正则匹配法条，最终每个 chunk 是一个法条
+- 使用 Enflame GCU 推理 bge-m3 模型生成稀疏嵌入向量，调用 Qwen3-Embedding-0.6B 模型生成密集嵌入向量
+- 将提取的元数据存入到 Collection 中，供后续元数据过滤使用
 
 ## 蓝绿部署
 
 该工作流实现了蓝绿部署模式，每次部署都会：
 
 1. 创建新的 Milvus 数据库（通过 `database-name` 参数指定）
-2. 在新数据库中创建固定名称的集合（`COLLECTION_NAME`）
-3. 将最新的案例数据插入到新集合中
+2. 在新数据库中创建集合（通过 `collection-name` 参数指定）
+3. 将法律数据插入到新集合中
 
 这样可以在不影响现有数据库的情况下进行部署，部署完成后可以将应用切换到新数据库。
 
@@ -71,7 +73,7 @@ ConfigMap bg-deploy-criminal-cases-config 包含以下环境变量：
 
 4. 终端运行工作流：
   ```bash
-  argo submit --from workflowtemplate/bg-deploy-criminal-cases \
+  argo submit --from workflowtemplate/bg-deploy-laws \
     -p database-name=<your-database-name>
   ```
 

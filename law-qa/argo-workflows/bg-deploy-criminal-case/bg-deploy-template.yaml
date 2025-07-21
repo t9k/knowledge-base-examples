@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: bg-deploy-criminal-cases
+  name: bg-deploy-criminal-case
 spec:
   entrypoint: download-and-process
   arguments:
@@ -11,10 +11,10 @@ spec:
   volumes:
     - name: workspace
       persistentVolumeClaim:
-        claimName: bg-deploy-criminal-cases-pvc
+        claimName: bg-deploy-criminal-case-pvc
     - name: env-config
       configMap:
-        name: bg-deploy-criminal-cases-config
+        name: bg-deploy-criminal-case-config
   templates:
     - name: download-and-process
       steps:
@@ -54,13 +54,13 @@ spec:
             # Generate timestamp for log filename
             TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
             echo -n "${TIMESTAMP}" > /tmp/log-timestamp.txt
-            LOG_DIR="/workspace/logs/bg-deploy-criminal-cases_${TIMESTAMP}"
+            LOG_DIR="/workspace/logs/bg-deploy-criminal-case_${TIMESTAMP}"
             mkdir -p "$LOG_DIR"
             LOG_FILE="$LOG_DIR/log.txt"
             
             # Start logging
             exec > >(tee -a "${LOG_FILE}") 2>&1
-            echo "=== Starting bg-deploy-criminal-cases workflow at $(date) ==="
+            echo "=== Starting bg-deploy-criminal-case workflow at $(date) ==="
             echo "=== Preparing workspace ==="
             
             # Validate database name
@@ -85,8 +85,8 @@ spec:
             
             git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
             mkdir -p /workspace/scripts
-            cp /tmp/repo/argo-workflows/bg-deploy-criminal-cases/*.sh /workspace/scripts/
-            cp /tmp/repo/argo-workflows/bg-deploy-criminal-cases/*.py /workspace/scripts/
+            cp /tmp/repo/law-qa/argo-workflows/bg-deploy-criminal-case/*.sh /workspace/scripts/
+            cp /tmp/repo/law-qa/argo-workflows/bg-deploy-criminal-case/*.py /workspace/scripts/
             
             echo "=== Prepare step completed at $(date) ==="
         volumeMounts:
@@ -105,7 +105,7 @@ spec:
         args:
           - |
             set -e
-            LOG_DIR="/workspace/logs/bg-deploy-criminal-cases_{{inputs.parameters.log-timestamp}}"
+            LOG_DIR="/workspace/logs/bg-deploy-criminal-case_{{inputs.parameters.log-timestamp}}"
             LOG_FILE="$LOG_DIR/log.txt"
             mkdir -p "$LOG_DIR"
             exec > >(tee -a "${LOG_FILE}") 2>&1
@@ -128,12 +128,12 @@ spec:
           - name: database-name
           - name: log-timestamp
       container:
-        image: registry.qy.t9kcloud.cn/topsrider/pytorch:2.3.0-milvus-bgem3-enflame
+        image: registry.qy.t9kcloud.cn/topsrider/pytorch:2.3.0-milvus-bgem3-openai-enflame
         command: [/bin/bash, -c]
         args:
           - |
             set -e
-            LOG_DIR="/workspace/logs/bg-deploy-criminal-cases_{{inputs.parameters.log-timestamp}}"
+            LOG_DIR="/workspace/logs/bg-deploy-criminal-case_{{inputs.parameters.log-timestamp}}"
             LOG_FILE="$LOG_DIR/log.txt"
             mkdir -p "$LOG_DIR"
             exec > >(tee -a "${LOG_FILE}") 2>&1
@@ -142,7 +142,7 @@ spec:
             # Run the insertion script
             export DATABASE_NAME="{{inputs.parameters.database-name}}"
             export LOG_FILE="${LOG_FILE}"
-            HF_ENDPOINT=https://hf-mirror.com /workspace/scripts/db-insert.py
+            HF_ENDPOINT=https://hf-mirror.com /workspace/scripts/db_insert.py
             
             echo "=== db-insert step completed at $(date) ==="
             echo "=== Workflow completed successfully at $(date) ==="

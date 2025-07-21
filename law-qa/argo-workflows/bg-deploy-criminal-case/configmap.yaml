@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bg-deploy-criminal-case-config
+data:
+  env.properties: |
+    MILVUS_URI="http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
+    MILVUS_TOKEN="root:Milvus"
+    PARENT_COLLECTION_NAME="criminal_case_parent"
+    COLLECTION_NAME="criminal_case"
+    EMBEDDING_BASE_URL="http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
+    EMBEDDING_MODEL="Qwen3-Embedding-0.6B"
+    CHAT_BASE_URL="http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
+    CHAT_MODEL="Qwen3-32B"
+    IS_PARENT_CHILD=true
+    IS_LLM_EXTRACT=true
+    LLM_WORKERS=4
