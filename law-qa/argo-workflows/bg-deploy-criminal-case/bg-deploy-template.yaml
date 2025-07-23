@@ -42,7 +42,7 @@ spec:
             valueFrom:
               path: /tmp/log-timestamp.txt
       container:
-        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.22
         command: [sh, -c]
         args:
           - |
@@ -100,7 +100,7 @@ spec:
         parameters:
           - name: log-timestamp
       container:
-        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.21.3
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.22
         command: [sh, -c]
         args:
           - |

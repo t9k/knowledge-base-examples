@@ -9,8 +9,8 @@ echo "$(date +'%Y-%m-%d %H:%M:%S') - Starting download.sh script"
 
 # Download CAIL2018_ALL_DATA.zip and unzip it
 if [ ! -d "law" ]; then
-    git clone https://www.modelscope.cn/datasets/qazwsxplkj/cn-laws-demo.git
-    mv cn-laws-demo law
+    git clone https://modelsphere.qy.t9kcloud.cn/datasets/t9k-ai/cn-laws.git
+    mv cn-laws law
 else
     echo "law directory already exists"
 fi

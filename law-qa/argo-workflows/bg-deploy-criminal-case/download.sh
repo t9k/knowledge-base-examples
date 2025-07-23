@@ -9,8 +9,9 @@ echo "$(date +'%Y-%m-%d %H:%M:%S') - Starting download.sh script"
 
 # Download CAIL2018_ALL_DATA.zip and unzip it
 if [ ! -d "criminal-case" ]; then
-    mkdir criminal-case && cd criminal-case
-    wget https://modelscope.cn/datasets/qazwsxplkj/CAIL2018-demo/resolve/master/exercise_contest_data_valid.json
+    git lfs install
+    git clone https://modelsphere.qy.t9kcloud.cn/datasets/t9k-ai/CAIL2018.git
+    mv CAIL2018 criminal-case
 else
     echo "criminal-case directory already exists"
 fi
