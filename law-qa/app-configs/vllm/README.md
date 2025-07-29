@@ -11,7 +11,7 @@
 - **API端点**: `/v1/chat/completions`
 
 ### qy-embedding.yaml  
-- **模型**: Qwen3-Embedding-0.6B
+- **模型**: Qwen3-Embedding-4B
 - **用途**: 生成文本的密集向量表示
 - **资源需求**: 4 CPU，64Gi 内存，1 GCU
 - **API端点**: `/v1/embeddings`

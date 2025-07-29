@@ -66,7 +66,7 @@ python preprocess_judgment_docs.py
 6. 将HTML实体编码替换为对应字符
 7. 移除"全文"中的换行符
 
-预处理后的数据文件放置在 <https://modelsphere.nc201.t9kcloud.cn/datasets/xyx/judgment-documents/files/main/preprocessed>。
+预处理后的数据文件放置在 <https://modelsphere.qy.t9kcloud.cn/datasets/t9k-ai/cn-judgment-docs-demo/files/main>。
 
 **数据规模**
 

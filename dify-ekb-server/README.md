@@ -5,7 +5,7 @@
 ## 功能
 
 - 实现了 [Dify 外部知识库 API](https://docs.dify.ai/zh-hans/guides/knowledge-base/api-documentation/external-knowledge-api-documentation)
-- Qwen3-Embedding-0.6B 模型提供密集嵌入，BGE-M3 模型提供稀疏嵌入，支持混合检索
+- Qwen3-Embedding-4B 模型提供密集嵌入，BGE-M3 模型提供稀疏嵌入，支持混合检索
 - 集成 Milvus 向量数据库，支持三种检索模式：
   - `dense`: 仅使用密集向量检索
   - `sparse`: 仅使用稀疏向量检索
