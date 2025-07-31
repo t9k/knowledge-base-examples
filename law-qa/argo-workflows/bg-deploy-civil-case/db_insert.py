@@ -713,7 +713,7 @@ def insert_data_streaming(col,
 
 
 def main():
-    path = "/workspace/civil-case/preprocessed_2021_10.csv"
+    path = "/workspace/civil-case/preprocessed_2021_07.csv"
 
     csv_files = []
 
