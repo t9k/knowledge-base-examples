@@ -121,7 +121,14 @@ spec:
             mountPath: /workspace
           - name: env-config
             mountPath: /env-config
- 
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 1
+          limits:
+            memory: 4Gi
+            cpu: 2
+
     - name: db-insert
       inputs:
         parameters:

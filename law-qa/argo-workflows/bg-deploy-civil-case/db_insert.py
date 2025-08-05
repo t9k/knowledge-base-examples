@@ -421,7 +421,7 @@ def setup_milvus_collection(dense_dim):
                     max_length=36),
         FieldSchema(name="case_id", dtype=DataType.VARCHAR, max_length=32),
         FieldSchema(name="chunk", dtype=DataType.VARCHAR, max_length=3000),
-        FieldSchema(name="case_number", dtype=DataType.VARCHAR, max_length=50),
+        FieldSchema(name="case_number", dtype=DataType.VARCHAR, max_length=200),
         FieldSchema(name="case_name", dtype=DataType.VARCHAR, max_length=500),
         FieldSchema(name="court", dtype=DataType.VARCHAR, max_length=90),
         FieldSchema(name="region", dtype=DataType.VARCHAR, max_length=45),
@@ -713,7 +713,7 @@ def insert_data_streaming(col,
 
 
 def main():
-    path = "/workspace/civil-case/preprocessed_2021_10.csv"
+    path = "/workspace/civil-case/preprocessed_2021_07.csv"
 
     csv_files = []
 
