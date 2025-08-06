@@ -33,14 +33,12 @@ law-qa/
 ## 快速开始
 
 ### 数据准备
+
 查看 [data/README.md](./data/README.md) 了解如何准备和处理法律数据。
 
-### 服务部署
-系统包含三种核心服务，查看对应文档了解部署方法：
+### 启用 Agent
 
-1. **向量数据库**：查看 [app-configs/milvus/README.md](./app-configs/milvus/README.md) 了解 Milvus 应用配置
-2. **模型服务**：查看 [app-configs/vllm/README.md](./app-configs/vllm/README.md) 了解 vLLM 应用配置  
-3. **检索服务**：查看 [mcp-servers/README.md](./mcp-servers/README.md) 了解 MCP 检索服务部署
+查看 [agent/README.md](./agent/README.md) 了解如何启动和配置法律智能助手 Agent。
 
 ### 应用集成
 
