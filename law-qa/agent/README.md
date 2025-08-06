@@ -1,11 +1,11 @@
 # 法律智能助手 Agent
 
-本目录包含法律智能助手的核心 Agent 实现，负责处理用户交互、调用 MCP 工具以及与语言模型通信。
+本目录包含法律智能问答的 Agent 实现，负责处理用户交互、调用 MCP 工具以及与语言模型通信。
 
 ## 文件说明
 
 - `agent.py`: Agent 的主程序。它使用 `qwen_agent` 库构建，可以启动一个命令行界面（CLI）或 Web UI 与用户交互。
-- `system-prompt.txt`: 定义了 Agent 的角色、行为准则和思考框架。Agent 在启动时会加载此文件作为其核心指令。
+- `system-prompt.md`: Agent 的系统提示词。
 
 ## 功能特点
 
