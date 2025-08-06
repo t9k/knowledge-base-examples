@@ -737,8 +737,10 @@ def main():
 
     llm_client = OpenAI(base_url=CHAT_BASE_URL, api_key="dummy", timeout=60)
 
-    ef = BGEM3EmbeddingFunction(use_fp16=False, device="cpu")
-    print("Using CPU for embedding")
+    import torch
+    import torch_gcu
+    ef = BGEM3EmbeddingFunction(use_fp16=False, device="gcu")
+    print("Using Enflame GCU for embedding")
     dense_dim = ef.dim["dense"]
     col, parent_col = setup_milvus_collection(dense_dim)
 
