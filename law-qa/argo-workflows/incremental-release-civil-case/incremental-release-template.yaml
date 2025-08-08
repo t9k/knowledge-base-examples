@@ -1,0 +1,157 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: incremental-release-civil-case
+spec:
+  entrypoint: download-and-process
+  volumes:
+    - name: workspace
+      persistentVolumeClaim:
+        claimName: incremental-release-civil-case-pvc
+    - name: env-config
+      configMap:
+        name: incremental-release-civil-case-config
+  templates:
+    - name: download-and-process
+      steps:
+        - - name: prepare
+            template: prepare
+        - - name: download
+            template: download
+            arguments:
+              parameters:
+                - name: log-timestamp
+                  value: "{{steps.prepare.outputs.parameters.log-timestamp}}"
+        - - name: db-insert
+            template: db-insert
+            arguments:
+              parameters:
+                - name: log-timestamp
+                  value: "{{steps.prepare.outputs.parameters.log-timestamp}}"
+
+    - name: prepare
+      outputs:
+        parameters:
+          - name: log-timestamp
+            valueFrom:
+              path: /tmp/log-timestamp.txt
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.22
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            
+            # Create logs directory
+            mkdir -p /workspace/logs
+
+            # Generate timestamp for log filename
+            TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+            echo -n "${TIMESTAMP}" > /tmp/log-timestamp.txt
+            LOG_DIR="/workspace/logs/incremental-release-civil-case_${TIMESTAMP}"
+            mkdir -p "$LOG_DIR"
+            LOG_FILE="$LOG_DIR/log.txt"
+            
+            # Start logging
+            exec > >(tee -a "${LOG_FILE}") 2>&1
+            echo "=== Starting incremental-release-civil-case workflow at $(date) ==="
+            echo "=== Preparing workspace ==="
+            
+            # Check env config for valid database and collection names
+            if [ -f /env-config/env.properties ]; then
+              source /env-config/env.properties
+              if [ -n "$DATABASE_NAME" ] && ! [[ $DATABASE_NAME =~ ^[a-zA-Z0-9_]+$ ]]; then
+                echo "Error: DATABASE_NAME='$DATABASE_NAME' is invalid. Database names can only contain numbers, letters, and underscores."
+                exit 1
+              fi
+              echo "Database name: $DATABASE_NAME"
+
+              if [ -n "$COLLECTION_NAME" ] && ! [[ $COLLECTION_NAME =~ ^[a-zA-Z0-9_]+$ ]]; then
+                echo "Error: COLLECTION_NAME='$COLLECTION_NAME' is invalid. Collection names can only contain numbers, letters, and underscores."
+                exit 1
+              fi
+              echo "Collection name: $COLLECTION_NAME"
+            fi
+            
+            git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
+            mkdir -p /workspace/scripts
+            cp /tmp/repo/law-qa/argo-workflows/incremental-release-civil-case/*.sh /workspace/scripts/
+            cp /tmp/repo/law-qa/argo-workflows/incremental-release-civil-case/*.py /workspace/scripts/
+            
+            echo "=== Prepare step completed at $(date) ==="
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+
+    - name: download
+      inputs:
+        parameters:
+          - name: log-timestamp
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.22
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            LOG_DIR="/workspace/logs/incremental-release-civil-case_{{inputs.parameters.log-timestamp}}"
+            LOG_FILE="$LOG_DIR/log.txt"
+            mkdir -p "$LOG_DIR"
+            exec > >(tee -a "${LOG_FILE}") 2>&1
+            echo "=== Starting download step at $(date) ==="
+            
+            cd /workspace
+            chmod +x /workspace/scripts/download.sh
+            /workspace/scripts/download.sh
+            
+            echo "=== Sync-files step completed at $(date) ==="
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 1
+          limits:
+            memory: 4Gi
+            cpu: 2
+
+    - name: db-insert
+      inputs:
+        parameters:
+          - name: log-timestamp
+      container:
+        image: registry.qy.t9kcloud.cn/topsrider/pytorch:2.3.0-milvus-bgem3-openai-enflame
+        command: [/bin/bash, -c]
+        args:
+          - |
+            set -e
+            LOG_DIR="/workspace/logs/incremental-release-civil-case_{{inputs.parameters.log-timestamp}}"
+            LOG_FILE="$LOG_DIR/log.txt"
+            mkdir -p "$LOG_DIR"
+            exec > >(tee -a "${LOG_FILE}") 2>&1
+            echo "=== Starting db-insert step at $(date) ==="
+            
+            # Run the insertion script
+            export LOG_FILE="${LOG_FILE}"
+            HF_ENDPOINT=https://hf-mirror.com /workspace/scripts/db_insert.py
+            
+            echo "=== db-insert step completed at $(date) ==="
+            echo "=== Workflow completed successfully at $(date) ==="
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+        resources:
+          requests:
+            enflame.com/gcu: 1
+            memory: 8Gi
+            cpu: 4
+          limits:
+            enflame.com/gcu: 1
+            memory: 16Gi
+            cpu: 8
