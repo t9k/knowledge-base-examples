@@ -1,4 +1,66 @@
-本助手名为法小助，由 TensorStack AI 开发。
+from typing import Dict, Any
+from qwen_agent.agents import Assistant
+from .config import AgentConfig
+
+
+def create_bot(config: AgentConfig) -> Assistant:
+    llm_cfg: Dict[str, Any] = {
+        'model': config.model,
+        'model_server': config.model_server,
+        'api_key': 'EMPTY',
+        'generate_cfg': {
+            'temperature': config.temperature,
+            'top_p': config.top_p,
+            'extra_body': {
+                'chat_template_kwargs': {
+                    'enable_thinking': config.enable_thinking,
+                    'thinking_budget': config.thinking_budget,
+                }
+            }
+        }
+    }
+
+    mcp_servers: Dict[str, Any] = {}
+    if config.enable_law_searcher:
+        mcp_servers['law-searcher'] = {
+            'type': 'streamable-http',
+            'url': config.law_searcher_url,
+        }
+    if config.enable_case_searcher:
+        mcp_servers['case-searcher'] = {
+            'type': 'streamable-http',
+            'url': config.case_searcher_url,
+        }
+    if config.enable_reranker:
+        mcp_servers['reranker'] = {
+            'type': 'streamable-http',
+            'url': config.reranker_url,
+        }
+
+    tools = []
+    if mcp_servers:
+        tools.append({'mcpServers': mcp_servers})
+
+    system_prompt = config_system_prompt()
+
+    bot = Assistant(
+        llm=llm_cfg,
+        system_message=system_prompt,
+        function_list=tools,
+        name='法小助',
+        description='专业的法律智能助手',
+    )
+    return bot
+
+
+def config_system_prompt() -> str:
+    # Keep this simple by referencing time at runtime (UI/API may render time independently)
+    from datetime import datetime
+    now = datetime.now()
+    formatted_date = f"{now.year}年{now.month}月{now.day}日"
+    formatted_time = now.strftime("%H:%M")
+
+    return f"""本助手名为法小助，由 TensorStack AI 开发。
 
 当前日期是 {formatted_date}，时间是 {formatted_time}。
 
@@ -24,7 +86,7 @@ c) 复杂情景分析：用户提供了一个包含多个事实要素和关系�
 
 d) 基于上下文的追问：用户的问题依赖于之前的对话内容，无法独立理解。
 
-示例：“那第二种情况呢？”“如果对方不同意这个方案怎么办？”
+示例："那第二种情况呢？""如果对方不同意这个方案怎么办？"
 
 e) 其他：无法归入以上任何一类的其他类型的问题。
 
@@ -92,4 +154,4 @@ e) 其他：无法归入以上任何一类的其他类型的问题。
 
 法小助会尽量以最简洁的方式回应用户请求，同时尊重用户提出的长度和完整性要求。法小助会聚焦当前任务，除非必要不会引入无关信息。
 
-法小助避免写清单式内容，若必须列出，会重点强调关键信息而非追求全面。若可用 1~3 句话或一小段话回答，就会这样做。若可用自然语言列出几个逗号分隔的例子，也会优先采用这种方式。法小助关注精炼高质量的表达，而非数量。
+法小助避免写清单式内容，若必须列出，会重点强调关键信息而非追求全面。若可用 1~3 句话或一小段话回答，就会这样做。若可用自然语言列出几个逗号分隔的例子，也会优先采用这种方式。法小助关注精炼高质量的表达，而非数量。""" 

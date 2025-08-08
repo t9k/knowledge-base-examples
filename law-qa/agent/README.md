@@ -1,24 +1,24 @@
-# 法律智能助手 Agent
+# 智能法律问答 Agent
 
-本目录包含法律智能问答的 Agent 实现，负责处理用户交互、调用 MCP 工具以及与语言模型通信。
+本目录包含法律智能问答的 Agent 实现，负责处理用户交互、调用 LLM 以及调用 MCP 工具。已支持三种交互方式：命令行（CLI）、WebUI、OpenAI 兼容 API。
 
-## 文件说明
+## 目录结构与说明
 
-- `agent.py`: Agent 的主程序。它使用 `qwen_agent` 库构建，可以启动一个命令行界面（CLI）或 Web UI 与用户交互。
-- `system-prompt.md`: Agent 的系统提示词。
+- `app.py`: 统一入口，根据 `--mode` 启动 CLI/WebUI/API
+- `core/`
+  - `config.py`: 配置聚合（命令行/环境变量/默认值），导出 `AgentConfig`
+  - `bot.py`: `create_bot(config) -> Assistant` 工厂；系统提示词与 MCP 工具装配
+  - `tokenizer.py`: 分词器加载与缓存
+  - `conversation.py`: 会话存储与追加（目前内存实现）
+- `interfaces/`
+  - `cli.py`: CLI 循环
+  - `webui.py`: WebUI 启动封装
+  - `openai_api.py`: FastAPI 实现的 OpenAI 兼容接口（含流式 SSE）
+- `system-prompt.md`: 系统提示词参考（实际已内置于 `core/bot.py`）
 
-## 功能特点
+## 依赖安装
 
-- **双模式交互**: 支持通过传统的命令行或更友好的 Web UI 与 Agent 聊天。
-- **模块化工具调用**: 可通过命令行参数动态启用不同的 MCP 服务（`law-searcher`, `case-searcher`, `reranker`），实现灵活的知识检索和处理能力。
-- **可配置模型**: 支持通过参数指定后端的大语言模型及其服务地址。
-- **智能上下文管理**: 自动管理对话历史，确保在不超过模型 Token 限制的前提下保持对话的连贯性。
-
-## 快速开始
-
-### 依赖安装
-
-确保已安装 `uv`，然后安装项目所需的依赖：
+确保已安装 `uv`，然后安装依赖：
 
 ```bash
 # 安装 uv
@@ -28,44 +28,91 @@
 uv sync
 ```
 
-### 启动 Agent
+## 启动方式
 
-你可以根据需要组合不同的参数来启动 Agent。
+以下命令均在当前目录执行。
 
-**1. 启动基本的命令行 Agent（不带任何工具）**
-
-```bash
-python agent.py --model-server <your-llm-api-endpoint>
-```
-
-**2. 启用特定的 MCP 检索工具**
-
-- **启用法条检索**:
-  ```bash
-  python agent.py --model-server <your-llm-api-endpoint> --law-searcher
-  ```
-
-- **启用案例检索和重排服务**:
-  ```bash
-  python agent.py --model-server <your-llm-api-endpoint> --case-searcher --reranker
-  ```
-
-- **启用所有工具**:
-  ```bash
-  python agent.py --model-server <your-llm-api-endpoint> --law-searcher --case-searcher --reranker
-  ```
-
-**3. 启动 Web UI**
-
-在任何启动命令后添加 `--webui` 参数即可启动 Web 界面。
+### 命令行（CLI）
 
 ```bash
-python agent.py --model-server <your-llm-api-endpoint> --law-searcher --case-searcher --reranker --webui
+uv run python app.py --mode cli \
+  --model-server http://127.0.0.1:8000/v1 \
+  --law-searcher --case-searcher --reranker
 ```
 
-### 可选参数
+支持指令：`/history`、`/clear`、`/exit`。
 
-- `--model`: 指定使用的大语言模型名称 (默认: `Qwen3-32B`)。
-- `--model-server`: 指定语言模型服务的 API 地址 (例如: `http://127.0.0.1:8000/v1`)。
-- `--tokenizer-path`: 指定分词器模型的路径 (默认: `Qwen/Qwen3-32B`)。
-- `--max-tokens`: 指定对话历史的最大 Token 数量 (默认: `10000`)。
+### WebUI
+
+```bash
+uv run python app.py --mode webui \
+  --model-server http://127.0.0.1:8000/v1 \
+  --law-searcher --case-searcher --reranker
+```
+
+可选头像：`--avatar ./chatbot.png`（默认同目录）。
+
+### OpenAI 兼容 API
+
+```bash
+uv run python app.py --mode api \
+  --api-host 0.0.0.0 --api-port 8001 --api-key YOUR_KEY \
+  --model-server http://127.0.0.1:8000/v1 \
+  --law-searcher --case-searcher --reranker
+```
+
+- 健康检查：`GET /healthz`
+- 列表模型：`GET /v1/models`
+- Chat Completions：`POST /v1/chat/completions`
+  - 非流式示例：
+    ```bash
+    curl -H "Authorization: Bearer YOUR_KEY" -H "Content-Type: application/json" \
+      -d '{"model":"Qwen3-32B","messages":[{"role":"user","content":"你好"}]}' \
+      http://127.0.0.1:8001/v1/chat/completions
+    ```
+  - 流式示例（SSE）：
+    ```bash
+    curl -N -H "Authorization: Bearer YOUR_KEY" -H "Content-Type: application/json" \
+      -d '{"model":"Qwen3-32B","stream":true,"messages":[{"role":"user","content":"你好"}]}' \
+      http://127.0.0.1:8001/v1/chat/completions
+    ```
+
+## 常用参数
+
+- 模式与基础
+  - `--mode {cli|webui|api}`：选择交互方式
+  - `--model`：模型名称（默认 `Qwen3-32B`）
+  - `--model-server`：模型服务地址（默认 `http://127.0.0.1:8000/v1`）
+  - `--tokenizer-path`：分词器路径（默认 `Qwen/Qwen3-32B`）
+  - `--max-tokens`：对话历史最大 Token（默认 `10000`）
+- MCP 工具开关与地址
+  - `--law-searcher` / `--law-searcher-url`
+  - `--case-searcher` / `--case-searcher-url`
+  - `--reranker` / `--reranker-url`
+- API 专属
+  - `--api-host` / `--api-port`
+  - `--api-key`：`Authorization: Bearer <API_KEY>` 鉴权
+  - `--allow-cors`：允许跨域
+- WebUI
+  - `--avatar`：头像路径（默认 `./chatbot.png`）
+
+## 环境变量（可选）
+
+- `AGENT_MODEL`, `AGENT_MODEL_SERVER`, `AGENT_TOKENIZER_PATH`, `AGENT_MAX_TOKENS`
+- `LAW_SEARCHER_URL`, `CASE_SEARCHER_URL`, `RERANKER_URL`
+- `AGENT_API_HOST`, `AGENT_API_PORT`, `AGENT_API_KEY`
+- `AGENT_AVATAR_PATH`
+
+示例：
+
+```bash
+export LAW_SEARCHER_URL=https://home.qy.t9kcloud.cn/mcp/law-searcher/mcp/
+export CASE_SEARCHER_URL=https://home.qy.t9kcloud.cn/mcp/case-searcher/mcp/
+export RERANKER_URL=https://home.qy.t9kcloud.cn/mcp/reranker/mcp/
+uv run python app.py --mode api --api-key YOUR_KEY
+```
+
+## 说明
+
+- 本项目内置系统提示词于 `core/bot.py`，`system-prompt.md` 作为参考与版本化记录。
+- OpenAI API 兼容实现已支持非流式与流式（SSE），可直接被常见 OpenAI SDK/客户端调用。
