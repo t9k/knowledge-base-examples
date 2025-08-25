@@ -5,8 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "qwen-agent>=0.0.29",
+    "qwen-agent[code-interpreter,gui,mcp,rag]>=0.0.29",
     "transformers>=4.55.0",
     "fastapi>=0.110.0",
     "uvicorn>=0.24.0",
+    "python-dateutil>=2.9.0.post0",
+    "dotenv>=0.9.9",
 ]

@@ -3,6 +3,8 @@ import os
 from contextlib import asynccontextmanager
 import logging
 from typing import Annotated, AsyncIterator, Optional
+from collections import defaultdict
+import json
 from pydantic import Field
 from dotenv import load_dotenv
 from fastmcp import FastMCP, Context
@@ -52,13 +54,13 @@ class MilvusConnector:
         self.criminal_output_fields = [
             "chunk", "relevant_articles", "accusation", "punish_of_money",
             "criminals", "imprisonment", "life_imprisonment", "death_penalty",
-            "dates", "locations", "people", "numbers", "criminals_llm"
+            "dates", "locations", "people", "numbers", "criminals_llm",
+            "parent_id", "fact_id"
         ]
         self.civil_output_fields = [
             "chunk", "case_number", "case_name", "court", "region",
-            "judgment_date", "parties", "case_cause", "legal_basis",
-            "parent_id", "dates", "locations", "people", "numbers",
-            "parties_llm"
+            "judgment_date", "parties", "case_cause", "legal_basis", "dates",
+            "locations", "people", "numbers", "parties_llm", "parent_id"
         ]
 
         self.embedding_client = OpenAI(base_url=embedding_base_url,
@@ -487,6 +489,53 @@ class MilvusContext:
         self.connector = connector
 
 
+def _get_field(item, key):
+    try:
+        return item.get(key)
+    except Exception:
+        try:
+            return getattr(item, key, None)
+        except Exception:
+            return None
+
+
+def format_grouped_sources(results: list[dict], group_field: str) -> str:
+    """将检索结果按指定字段分组（民事：case_number；刑事：fact_id），输出 <source> 块。"""
+    groups: dict[str, dict[str, list]] = defaultdict(lambda: {
+        "document": [],
+        "distances": [],
+    })
+
+    for item in results:
+        name = _get_field(item, group_field)
+        if name is None:
+            # 跳过缺少分组键的条目
+            continue
+        chunk_text = _get_field(item, "chunk")
+        distance = _get_field(item, "distance")
+        if chunk_text is not None:
+            groups[name]["document"].append(chunk_text)
+        if distance is not None:
+            groups[name]["distances"].append(distance)
+
+    output_parts: list[str] = []
+    for i, (name, payload) in enumerate(groups.items(), start=1):
+        block = {
+            "source": {
+                "name": name
+            },
+            "document": payload["document"],
+            "distances": payload["distances"],
+        }
+        block_str = json.dumps(block, ensure_ascii=False, indent=4)
+        output_parts.append(f'<source id="{i}">\n{block_str}\n</source>')
+
+    prompt = """请根据上面的检索结果回答用户的问题，并在需要时加入行内引用，引用格式为 [id]，对应 <source id="n"> 标签。
+
+行内引用示例：“根据研究，该方法可以提高 20% 的效率 [1]。”"""
+    return "\n".join(output_parts) + "\n" + prompt
+
+
 @asynccontextmanager
 async def server_lifespan(server: FastMCP) -> AsyncIterator[MilvusContext]:
     """Manage application lifecycle for Milvus connector."""
@@ -575,11 +624,7 @@ async def criminal_case_query(
         filter_expr=filter_expr,
         limit=limit)
 
-    output = f"Query results for '{filter_expr}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results, group_field="fact_id")
 
 
 @mcp.tool()
@@ -634,11 +679,7 @@ async def criminal_case_sparse_search(
         filter_expr=filter_expr,
         parent_child=parent_child)
 
-    output = f"Sparse vector search results for '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results, group_field="fact_id")
 
 
 @mcp.tool()
@@ -693,11 +734,7 @@ async def criminal_case_dense_search(
         filter_expr=filter_expr,
         parent_child=parent_child)
 
-    output = f"Dense vector search results for '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results, group_field="fact_id")
 
 
 @mcp.tool()
@@ -754,11 +791,7 @@ async def criminal_case_hybrid_search(
         parent_child=parent_child,
     )
 
-    output = f"Hybrid search results for text '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results, group_field="fact_id")
 
 
 @mcp.tool()
@@ -802,11 +835,7 @@ async def civil_case_query(
                                     filter_expr=filter_expr,
                                     limit=limit)
 
-    output = f"Query results for '{filter_expr}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results, group_field="case_number")
 
 
 @mcp.tool()
@@ -862,11 +891,7 @@ async def civil_case_sparse_search(
         filter_expr=filter_expr,
         parent_child=parent_child)
 
-    output = f"Sparse vector search results for '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results, group_field="case_number")
 
 
 @mcp.tool()
@@ -922,11 +947,7 @@ async def civil_case_dense_search(
         filter_expr=filter_expr,
         parent_child=parent_child)
 
-    output = f"Dense vector search results for '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results, group_field="case_number")
 
 
 @mcp.tool()
@@ -984,11 +1005,7 @@ async def civil_case_hybrid_search(
         parent_child=parent_child,
     )
 
-    output = f"Hybrid search results for text '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results, group_field="case_number")
 
 
 @mcp.custom_route("/health", methods=["GET"])

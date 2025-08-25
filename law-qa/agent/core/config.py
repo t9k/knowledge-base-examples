@@ -34,7 +34,7 @@ class AgentConfig:
     api_host: str = os.getenv('AGENT_API_HOST', '0.0.0.0')
     api_port: int = int(os.getenv('AGENT_API_PORT', '8001'))
     api_auth_key: Optional[str] = os.getenv('AGENT_API_KEY')
-    allow_cors: bool = False
+    allow_cors: bool = True
 
     # WebUI
     avatar_path: str = './chatbot.png'

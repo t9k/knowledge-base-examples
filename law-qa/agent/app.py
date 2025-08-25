@@ -11,12 +11,19 @@ def main():
 
     if cfg.mode == 'api':
         print(f"Starting API server at http://{cfg.api_host}:{cfg.api_port}")
-        run_api(bot, model_name=cfg.model, host=cfg.api_host, port=cfg.api_port, api_key=cfg.api_auth_key, allow_cors=cfg.allow_cors)
+        run_api(bot,
+                model_name='law-assistant',
+                host=cfg.api_host,
+                port=cfg.api_port,
+                api_key=cfg.api_auth_key,
+                allow_cors=cfg.allow_cors)
     elif cfg.mode == 'webui':
         run_webui(bot, avatar_path=cfg.avatar_path)
     else:
-        run_cli(bot, tokenizer_path=cfg.tokenizer_path, max_tokens=cfg.max_tokens)
+        run_cli(bot,
+                tokenizer_path=cfg.tokenizer_path,
+                max_tokens=cfg.max_tokens)
 
 
 if __name__ == '__main__':
-    main() 
+    main()

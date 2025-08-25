@@ -3,6 +3,8 @@ import os
 from contextlib import asynccontextmanager
 import logging
 from typing import Annotated, AsyncIterator, Optional
+from collections import defaultdict
+import json
 from pydantic import Field
 from dotenv import load_dotenv
 from fastmcp import FastMCP, Context
@@ -242,6 +244,51 @@ class MilvusContext:
         self.connector = connector
 
 
+def format_grouped_sources(results: list[dict]) -> str:
+    """将检索结果按照 law + part + chapter + section 分组并输出为 <source>... 块。
+
+    格式：
+    <source id="1">
+    {"source": {"name": "..."}, "document": [...], "distances": [...]}
+    </source>
+    """
+    groups: dict[str, dict[str, list]] = defaultdict(lambda: {
+        "document": [],
+        "distances": []
+    })
+
+    for item in results:
+        # 结果为扁平字段：chunk, law, part, chapter, section, article, distance
+        law = item.get("law")
+        part = item.get("part")
+        chapter = item.get("chapter")
+        section = item.get("section")
+        key_parts = [p for p in [law, part, chapter, section] if p]
+        key = " ".join(key_parts) if key_parts else ""
+
+        chunk_text = item.get("chunk")
+        distance = item.get("distance")
+        if chunk_text is not None:
+            groups[key]["document"].append(chunk_text)
+        if distance is not None:
+            groups[key]["distances"].append(distance)
+
+    output_parts: list[str] = []
+    for i, (name, payload) in enumerate(groups.items(), start=1):
+        block = {
+            "source": {"name": name},
+            "document": payload["document"],
+            "distances": payload["distances"],
+        }
+        block_str = json.dumps(block, ensure_ascii=False, indent=4)
+        output_parts.append(f'<source id="{i}">\n{block_str}\n</source>')
+
+    prompt = """请根据上面的检索结果回答用户的问题，并在需要时加入行内引用，引用格式为 [id]，对应 <source id="n"> 标签。
+
+行内引用示例：“根据研究，该方法可以提高 20% 的效率 [1]。”"""
+    return "\n".join(output_parts) + "\n" + prompt
+
+
 @asynccontextmanager
 async def server_lifespan(server: FastMCP) -> AsyncIterator[MilvusContext]:
     """Manage application lifecycle for Milvus connector."""
@@ -386,11 +433,7 @@ async def criminal_law_query(
         filter_expr=filter_expr,
         limit=limit)
 
-    output = f"Query results for '{filter_expr}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results)
 
 
 @mcp.tool()
@@ -431,11 +474,7 @@ async def criminal_law_sparse_search(
         limit=limit,
         filter_expr=filter_expr)
 
-    output = f"Sparse vector search results for '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results)
 
 
 @mcp.tool()
@@ -476,11 +515,7 @@ async def criminal_law_dense_search(
         limit=limit,
         filter_expr=filter_expr)
 
-    output = f"Dense vector search results for '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results)
 
 
 @mcp.tool()
@@ -523,11 +558,7 @@ async def criminal_law_hybrid_search(
         filter_expr=filter_expr,
     )
 
-    output = f"Hybrid search results for text '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results)
 
 
 @mcp.resource("data://civil-code-contents")
@@ -721,11 +752,7 @@ async def civil_code_query(
                                     filter_expr=filter_expr,
                                     limit=limit)
 
-    output = f"Query results for '{filter_expr}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results)
 
 
 @mcp.tool()
@@ -772,12 +799,7 @@ async def civil_code_sparse_search(
         query_text=query_text,
         limit=limit,
         filter_expr=filter_expr)
-
-    output = f"Sparse vector search results for '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results)
 
 
 @mcp.tool()
@@ -825,11 +847,7 @@ async def civil_code_dense_search(
         limit=limit,
         filter_expr=filter_expr)
 
-    output = f"Dense vector search results for '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results)
 
 
 @mcp.tool()
@@ -879,11 +897,7 @@ async def civil_code_hybrid_search(
         filter_expr=filter_expr,
     )
 
-    output = f"Hybrid search results for text '{query_text}':\n\n"
-    for result in results:
-        output += f"{result}\n\n"
-
-    return output
+    return format_grouped_sources(results)
 
 
 @mcp.custom_route("/health", methods=["GET"])

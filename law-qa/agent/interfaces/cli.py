@@ -3,21 +3,20 @@ from typing import List, Dict, Any
 
 from qwen_agent.utils.output_beautify import typewriter_print
 
-from core.tokenizer import get_tokenizer
+from core.conversation import InMemoryConversationStore, append_turn
 
 
 def run_cli(bot, tokenizer_path: str, max_tokens: int):
-    try:
-        tokenizer = get_tokenizer(tokenizer_path)
-    except Exception as e:
-        print(f"Error loading tokenizer from '{tokenizer_path}': {e}")
-        return
+    # 使用会话存储，基于 tokenizer+max_tokens 做历史截断
+    store = InMemoryConversationStore(tokenizer_path=tokenizer_path,
+                                      max_tokens=max_tokens)
+    session_id = 'cli'
 
     user_prompt_prefix = ("提示：法小助必须精准识别用户的真实意图；需要调用检索工具进行查询，除非答案已经在上下文中；"
                           "如果用户没有提及法条编号，不得使用法条编号来查询或检索；"
                           "如果检索结果为空，应移除过滤表达式，重新调用检索工具。\n\n")
 
-    messages: List[Dict[str, Any]] = []
+    messages: List[Dict[str, Any]] = store.get(session_id)
     while True:
         print()
         query = input('\nUser: ')
@@ -28,6 +27,7 @@ def run_cli(bot, tokenizer_path: str, max_tokens: int):
             pprint.pprint(messages, width=120)
             continue
         if query.strip() == '/clear':
+            store.clear(session_id)
             messages = []
             print('Chat history cleared!\n')
             continue
@@ -35,16 +35,20 @@ def run_cli(bot, tokenizer_path: str, max_tokens: int):
             print('Bye!')
             break
 
-        if messages:
-            query = user_prompt_prefix + query
-        messages.append({'role': 'user', 'content': query})
+        # 取最新历史（已按 token 截断）
+        messages = store.get(session_id)
+
+        # 组织当前 user 消息（首轮不加提示，后续轮次加前缀）
+        content = (user_prompt_prefix + query) if messages else query
+        user_msg: Dict[str, Any] = {'role': 'user', 'content': content}
 
         response_plain_text = ''
         print()
         print('Assistant: ')
 
         try:
-            for response in bot.run(messages=messages):
+            # 传入“历史 + 当前 user 消息”
+            for response in bot.run(messages=messages + [user_msg]):
                 # Streaming output.
                 response_plain_text = typewriter_print(response,
                                                        response_plain_text)
@@ -56,8 +60,15 @@ def run_cli(bot, tokenizer_path: str, max_tokens: int):
             continue
 
         # Append the bot's complete response to the chat history.
+        sanitized_events: List[Dict[str, Any]] = []
         for r in response:
             if r.get('function_call', ''):
-                messages.append(r)
-            elif r['role'] == 'assistant' and r['content']:
-                messages.append(r)
+                sanitized_events.append(r)
+            elif r.get('role') == 'assistant' and r.get('content'):
+                content = r['content']
+                if not content.endswith('\n</think>\n\n'):
+                    content = content.split('\n</think>\n\n')[-1]
+                sanitized_events.append({'role': 'assistant', 'content': content})
+
+        messages = append_turn(messages, user_msg, sanitized_events)
+        store.set(session_id, messages)
