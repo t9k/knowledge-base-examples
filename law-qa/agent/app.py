@@ -16,7 +16,8 @@ def main():
                 host=cfg.api_host,
                 port=cfg.api_port,
                 api_key=cfg.api_auth_key,
-                allow_cors=cfg.allow_cors)
+                allow_cors=cfg.allow_cors,
+                tokenizer_path=cfg.tokenizer_path)
     elif cfg.mode == 'webui':
         run_webui(bot, avatar_path=cfg.avatar_path)
     else:

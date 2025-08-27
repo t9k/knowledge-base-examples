@@ -530,7 +530,9 @@ def format_grouped_sources(results: list[dict], group_field: str) -> str:
         block_str = json.dumps(block, ensure_ascii=False, indent=4)
         output_parts.append(f'<source id="{i}">\n{block_str}\n</source>')
 
-    prompt = """请根据上面的检索结果回答用户的问题，并在需要时加入行内引用，引用格式为 [id]，对应 <source id="n"> 标签。
+    prompt = """请根据上面的检索结果回答用户的问题，并在需要时加入行内引用，引用格式为 [n]，对应 <source id="n"> 标签。
+
+注意一个 <source id="n"></source> 块内可能有多篇 document，引用其中任意一篇的格式都是 [n]。
 
 行内引用示例：“根据研究，该方法可以提高 20% 的效率 [1]。”"""
     return "\n".join(output_parts) + "\n" + prompt

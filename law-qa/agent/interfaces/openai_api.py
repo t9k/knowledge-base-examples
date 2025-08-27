@@ -1,22 +1,47 @@
 from typing import List, Optional, Dict, Any
 import time
+import math
 import json
 import re
 import logging
+import os
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
-# 模块级日志器（避免重复添加 handler）
+from core.tokenizer import get_tokenizer
+
+# 模块级日志器（同时写入文件 ../logs/openai_api_YYYYMMDD_PID.log 与标准输出）
 logger = logging.getLogger(__name__)
-if not logger.handlers:
-    _handler = logging.StreamHandler()
+try:
+    # 清理已有 handler，避免重复输出
+    if logger.handlers:
+        logger.handlers.clear()
+    logs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logs"))
+    os.makedirs(logs_dir, exist_ok=True)
+    log_path = os.path.join(
+        logs_dir,
+        f"openai_api_{time.strftime('%Y%m%d')}_{os.getpid()}.log",
+    )
+    _file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    _stream_handler = logging.StreamHandler()
     _formatter = logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
-    _handler.setFormatter(_formatter)
-    logger.addHandler(_handler)
-logger.setLevel(logging.INFO)
+    _file_handler.setFormatter(_formatter)
+    _stream_handler.setFormatter(_formatter)
+    logger.addHandler(_file_handler)
+    logger.addHandler(_stream_handler)
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    logger.info("Logging to %s", log_path)
+except Exception:
+    # 兜底：若文件 handler 初始化失败，退回到标准输出
+    if not logger.handlers:
+        _fallback = logging.StreamHandler()
+        _fallback.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+        logger.addHandler(_fallback)
+    logger.setLevel(logging.INFO)
 
 
 class ChatMessage(BaseModel):
@@ -33,8 +58,29 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = None
 
 
-def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: bool = False) -> FastAPI:
+def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: bool = False, tokenizer_path: Optional[str] = None) -> FastAPI:
     app = FastAPI()
+    # 懒加载 tokenizer（可选）
+    tokenizer = None
+    if tokenizer_path:
+        try:
+            tokenizer = get_tokenizer(tokenizer_path)
+            logger.info("Loaded tokenizer '%s'", tokenizer_path)
+        except Exception:
+            tokenizer = None
+            logger.warning("Failed to load tokenizer '%s'. Will fall back to char-level throughput.", tokenizer_path)
+
+    def _count_tokens(text: str) -> int:
+        if not text:
+            return 0
+        try:
+            if tokenizer is not None:
+                return len(tokenizer.encode(text))
+        except Exception:
+            pass
+        # 回退：按字符近似
+        return len(text)
+
 
     if allow_cors:
         app.add_middleware(
@@ -169,14 +215,21 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
             def event_generator():
                 # 维护累计状态，做增量 diff
                 first_chunk_sent = False
+                first_token_emitted = False
+                ttft_s = None
                 last_content = ""
                 last_reasoning = ""
                 last_tool_calls_len = 0
                 last_tool_response = ""
                 collected_tool_calls: List[Dict[str, Any]] = []
+                gen_t0 = time.perf_counter()
                 try:
                     for event in bot.run(messages=messages):
                         if isinstance(event, list):
+                            if not first_token_emitted and event[0]['content']:
+                                first_token_emitted = True
+                                ttft_s = max(0.0, time.perf_counter() - gen_t0)
+
                             acc = _accumulate_oai_message(event)
 
                             # 发送首个空内容块，含 role 字段（与期望示例一致）
@@ -414,9 +467,12 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
                     yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
                 # final empty delta with finish_reason
                 try:
+                    total_s = max(1e-6, time.perf_counter() - gen_t0)
+                    out_tok = _count_tokens(last_content)
+                    tps = out_tok / total_s if total_s > 0 else math.nan
                     logger.info(
-                        "Streaming finished: content_len=%d, reasoning_len=%d, tool_calls=%d, tool_response_len=%d",
-                        len(last_content), len(last_reasoning), last_tool_calls_len, len(last_tool_response),
+                        "[METRICS] ttft_ms=%s, total_time_ms=%d, output_tokens=%d, throughput_toks_per_s=%.2f",
+                        ("%d" % int(ttft_s * 1000) if ttft_s is not None else "-"), int(total_s * 1000), out_tok, tps, 
                     )
                     # 打印全部请求消息（原始与过滤后）
                     logger.info("All request messages: %s", json.dumps(raw_messages, ensure_ascii=False))
@@ -431,7 +487,7 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
                         if last_tool_response:
                             assistant_snapshot["tool_response"] = last_tool_response
                         final_messages_log.append(assistant_snapshot)
-                        logger.info("All messages (final): %s", json.dumps(final_messages_log, ensure_ascii=False))
+                        logger.info("All messages: %s", json.dumps(final_messages_log, ensure_ascii=False))
                     except Exception:
                         logger.exception("Failed to log final all messages (streaming)")
                 except Exception:
@@ -451,10 +507,12 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
             return StreamingResponse(event_generator(), media_type="text/event-stream")
 
         # Non-streaming path: prefer final aggregated messages if present
+        logger.info("Non-streaming response started: model=%s, temperature=%s, top_p=%s, max_tokens=%s", req.model or model_name, req.temperature, req.top_p, req.max_tokens)
         assistant_text_parts: List[str] = []
         reasoning_parts: List[str] = []
         tool_calls: List[Dict[str, Any]] = []
         final_messages: Optional[List[Dict[str, Any]]] = None
+        gen_t0 = time.perf_counter()
         try:
             for event in bot.run(messages=messages):
                 if isinstance(event, dict):
@@ -544,9 +602,12 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
         }
         # 记录非流式的最终回复
         try:
+            total_s = time.perf_counter() - gen_t0
+            out_tok = _count_tokens(assistant_text)
+            tps = out_tok / total_s if total_s > 0 else math.nan
             logger.info(
-                "Non-streaming finished: content_len=%d, reasoning_len=%d, tool_calls=%d",
-                len(assistant_text), len(reasoning_content), len(tool_calls),
+                "[METRICS] total_time_ms=%d, output_tokens=%d, throughput_toks_per_s=%.2f",
+                int(total_s * 1000), out_tok, tps,
             )
             # 同时打印全部请求消息（原始与过滤后）
             logger.info("All request messages: %s", json.dumps(raw_messages, ensure_ascii=False))
@@ -559,7 +620,7 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
                 if tool_calls:
                     assistant_snapshot["tool_calls"] = tool_calls
                 final_messages_log.append(assistant_snapshot)
-                logger.info("All messages (final): %s", json.dumps(final_messages_log, ensure_ascii=False))
+                logger.info("All messages: %s", json.dumps(final_messages_log, ensure_ascii=False))
             except Exception:
                 logger.exception("Failed to log final all messages (non-streaming)")
             # 可选：如需完整输出可取消注释
@@ -575,8 +636,8 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
     return app
 
 
-def run_api(bot, model_name: str, host: str = "0.0.0.0", port: int = 8001, api_key: Optional[str] = None, allow_cors: bool = False):
+def run_api(bot, model_name: str, host: str = "0.0.0.0", port: int = 8001, api_key: Optional[str] = None, allow_cors: bool = False, tokenizer_path: Optional[str] = None):
     import uvicorn
 
-    app = create_app(bot, model_name=model_name, api_key=api_key, allow_cors=allow_cors)
+    app = create_app(bot, model_name=model_name, api_key=api_key, allow_cors=allow_cors, tokenizer_path=tokenizer_path)
     uvicorn.run(app, host=host, port=port)

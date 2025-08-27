@@ -1,5 +1,8 @@
 import pprint
 from typing import List, Dict, Any
+import time
+import math
+from core.tokenizer import get_tokenizer
 
 from qwen_agent.utils.output_beautify import typewriter_print
 
@@ -10,6 +13,7 @@ def run_cli(bot, tokenizer_path: str, max_tokens: int):
     # 使用会话存储，基于 tokenizer+max_tokens 做历史截断
     store = InMemoryConversationStore(tokenizer_path=tokenizer_path,
                                       max_tokens=max_tokens)
+    tokenizer = get_tokenizer(tokenizer_path)
     session_id = 'cli'
 
     user_prompt_prefix = ("提示：法小助必须精准识别用户的真实意图；需要调用检索工具进行查询，除非答案已经在上下文中；"
@@ -48,8 +52,13 @@ def run_cli(bot, tokenizer_path: str, max_tokens: int):
 
         try:
             # 传入“历史 + 当前 user 消息”
+            first_token_emitted = False
+            gen_t0 = time.perf_counter()
             for response in bot.run(messages=messages + [user_msg]):
                 # Streaming output.
+                if not first_token_emitted:
+                    first_token_emitted = True
+                    ttft_s = max(0.0, time.perf_counter() - gen_t0)
                 response_plain_text = typewriter_print(response,
                                                        response_plain_text)
         except KeyboardInterrupt:
@@ -71,4 +80,13 @@ def run_cli(bot, tokenizer_path: str, max_tokens: int):
                 sanitized_events.append({'role': 'assistant', 'content': content})
 
         messages = append_turn(messages, user_msg, sanitized_events)
+        # 统计输出 token 数与吞吐
+        try:
+            total_s = time.perf_counter() - gen_t0
+            out_text = "".join([e.get('content', '') for e in sanitized_events if e.get('role') == 'assistant'])
+            out_tok = len(tokenizer.encode(out_text))
+            tps = out_tok / total_s if total_s > 0 else math.nan
+            print(f"\n[METRICS] TTFT: {int(ttft_s*1000)} ms, Total: {int(total_s*1000)} ms, Output tokens: {out_tok}, TPS: {tps:.2f}")
+        except Exception:
+            pass
         store.set(session_id, messages)

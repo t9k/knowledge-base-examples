@@ -1,8 +1,6 @@
 import ast
 import json
-from pprint import pprint
 from pydantic import BaseModel
-from typing import Optional
 
 
 class Filter:
@@ -89,16 +87,16 @@ class Filter:
                         elif "civil_case" in fn:
                             self.search_category = "民事案件"
 
-                    await __event_emitter__(
-                        {
-                            "type": "status",  # See the event types list below
-                            "data": {
-                                "description": f"🔍 正在检索{self.search_category}...",
-                                "done": False,
-                                "hidden": False,
-                            },
-                        }
-                    )
+                    # await __event_emitter__(
+                    #     {
+                    #         "type": "status",  # See the event types list below
+                    #         "data": {
+                    #             "description": f"🔍 正在检索{self.search_category}...",
+                    #             "done": False,
+                    #             "hidden": False,
+                    #         },
+                    #     }
+                    # )
 
                     return {
                         "id": event["id"],
@@ -155,16 +153,16 @@ class Filter:
                             }
                         )
 
-                    await __event_emitter__(
-                        {
-                            "type": "status",  # See the event types list below
-                            "data": {
-                                "description": f"📄 检索到 {len(citations)} 个来源",
-                                "done": False,
-                                "hidden": False,
-                            },
-                        }
-                    )
+                    # await __event_emitter__(
+                    #     {
+                    #         "type": "status",  # See the event types list below
+                    #         "data": {
+                    #             "description": f"📄 检索到 {len(citations)} 个来源",
+                    #             "done": False,
+                    #             "hidden": False,
+                    #         },
+                    #     }
+                    # )
 
                     return {
                         "id": event["id"],
