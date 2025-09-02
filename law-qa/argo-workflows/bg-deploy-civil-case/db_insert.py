@@ -195,7 +195,7 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=overlap,
-        separators=["\r\n", "\n", "。", "；", "，", "、", "："],
+        separators=["\r\n", "\n", "。", "；", "，", "、", "：", "（", "）"],
         keep_separator="end")
     return text_splitter.split_text(text)
 
@@ -310,7 +310,7 @@ def extract_metadata_with_llm(chunk, client):
 
     def extract_single_type(prompt_data):
         field_name, prompt = prompt_data
-        max_retries = 4  # 总共5次尝试（初始1次 + 重试4次）
+        max_retries = 0  # 总共5次尝试（初始1次 + 重试4次）
         for attempt in range(max_retries + 1):
             try:
                 response = client.chat.completions.create(
@@ -366,6 +366,11 @@ def extract_metadata_with_llm(chunk, client):
             field_name, data = future.result()
             results[field_name] = data
 
+    if len(chunk) > 1200:
+        print(111)
+        print(chunk)
+        print(111)
+
     if len(results["locations"]) > 200:
         results["locations"] = "<none>"
 
@@ -420,7 +425,7 @@ def setup_milvus_collection(dense_dim):
                     is_primary=True,
                     max_length=36),
         FieldSchema(name="case_id", dtype=DataType.VARCHAR, max_length=32),
-        FieldSchema(name="chunk", dtype=DataType.VARCHAR, max_length=3000),
+        FieldSchema(name="chunk", dtype=DataType.VARCHAR, max_length=4000),
         FieldSchema(name="case_number", dtype=DataType.VARCHAR, max_length=200),
         FieldSchema(name="case_name", dtype=DataType.VARCHAR, max_length=500),
         FieldSchema(name="court", dtype=DataType.VARCHAR, max_length=90),

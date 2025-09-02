@@ -208,7 +208,7 @@ def extract_metadata_with_llm(chunk, client):
 
     def extract_single_type(prompt_data):
         field_name, prompt = prompt_data
-        max_retries = 4  # 总共5次尝试（初始1次 + 重试4次）
+        max_retries = 0  # 总共5次尝试（初始1次 + 重试4次）
         for attempt in range(max_retries + 1):
             try:
                 response = client.chat.completions.create(
@@ -225,11 +225,12 @@ def extract_metadata_with_llm(chunk, client):
                     ],
                     extra_body={
                         "chat_template_kwargs": {
-                            "enable_thinking": False
+                            "enable_thinking": True
                         },
                     },
                     temperature=0.0)
-                data = response.choices[0].message.content.strip()
+                # data = response.choices[0].message.content.strip()
+                data = response.choices[0].message.content.split("</think>\n\n")[-1].strip()
 
                 if len(data) > 100:
                     data = data.split("：\n")[-1].split("\n\n")[-1]
@@ -266,6 +267,15 @@ def extract_metadata_with_llm(chunk, client):
 
         if len(results["locations"]) > 200:
             results["locations"] = "<none>"
+
+        if len(results["people"]) > 600:
+            results["people"] = "<none>"
+
+        if len(results["numbers"]) > 400:
+            results["numbers"] = "<none>"
+
+        if len(results["criminals_llm"]) > 200:
+            results["criminals_llm"] = "<none>"
 
     return results
 
@@ -572,7 +582,7 @@ def insert_data_streaming(col,
 
 
 def main():
-    path = "/workspace/criminal-case/exercise_contest_data_valid.json"
+    path = "/workspace/criminal-case/"
 
     jsonl_files = []
 
@@ -580,6 +590,8 @@ def main():
         # 如果是目录，递归处理目录及子目录下所有的json文件
         for root, _, files in os.walk(path):
             for file in files:
+                if file.endswith('rest_data.json'):
+                    continue
                 if file.endswith('.json'):
                     jsonl_files.append(os.path.join(root, file))
 
