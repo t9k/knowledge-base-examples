@@ -23,8 +23,15 @@ from openai import OpenAI
 import torch
 import torch_gcu
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("FastMCP.__main__")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setLevel(logging.INFO)
+    _handler.setFormatter(
+        logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    logger.addHandler(_handler)
+logger.propagate = False
 
 
 class MilvusConnector:
@@ -244,6 +251,19 @@ class MilvusContext:
         self.connector = connector
 
 
+def _preview(value, max_len: int = 2000) -> str:
+    try:
+        if isinstance(value, str):
+            s = value
+        else:
+            s = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        s = str(value)
+    if len(s) > max_len:
+        return f"{s[:max_len]}... (truncated, total_length={len(s)})"
+    return s
+
+
 def format_grouped_sources(results: list[dict]) -> str:
     """将检索结果按照 law + part + chapter + section 分组并输出为 <source>... 块。
 
@@ -392,7 +412,7 @@ async def criminal_law_contents() -> str:
   第七章 危害国防利益罪  
   第八章 贪污贿赂罪  
   第九章 渎职罪  
-  第十章 军人违反职责罪附则  
+  第十章 军人违反职责罪附则
 
 附则
 """
@@ -429,13 +449,30 @@ async def criminal_law_query(
     1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
     "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
     """
+    logger.info("Calling tool criminal_law_query, params: %s",
+                _preview({"filter_expr": filter_expr, "limit": limit}))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.query(
         collection=connector.criminal_law_collection,
         filter_expr=filter_expr,
         limit=limit)
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_law_query, retrying without filter_expr")
+        try:
+            results = await connector.query(
+                collection=connector.criminal_law_collection,
+                filter_expr=None,
+                limit=limit)
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in criminal_law_query: %s",
+                e)
 
-    return format_grouped_sources(results)
+    response = format_grouped_sources(results)
+    logger.info("Finished tool criminal_law_query, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -469,14 +506,37 @@ async def criminal_law_sparse_search(
     1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
     "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
     """
+    logger.info(
+        "Calling tool criminal_law_sparse_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+        }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
         collection=connector.criminal_law_collection,
         query_text=query_text,
         limit=limit,
         filter_expr=filter_expr)
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_law_sparse_search, retrying without filter_expr")
+        try:
+            results = await connector.sparse_search(
+                collection=connector.criminal_law_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None)
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in criminal_law_sparse_search: %s",
+                e)
 
-    return format_grouped_sources(results)
+    response = format_grouped_sources(results)
+    logger.info("Finished tool criminal_law_sparse_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -510,14 +570,37 @@ async def criminal_law_dense_search(
     1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
     "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
     """
+    logger.info(
+        "Calling tool criminal_law_dense_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+        }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(
         collection=connector.criminal_law_collection,
         query_text=query_text,
         limit=limit,
         filter_expr=filter_expr)
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_law_dense_search, retrying without filter_expr")
+        try:
+            results = await connector.dense_search(
+                collection=connector.criminal_law_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None)
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in criminal_law_dense_search: %s",
+                e)
 
-    return format_grouped_sources(results)
+    response = format_grouped_sources(results)
+    logger.info("Finished tool criminal_law_dense_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -551,6 +634,13 @@ async def criminal_law_hybrid_search(
     1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
     "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
     """
+    logger.info(
+        "Calling tool criminal_law_hybrid_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+        }))
     connector = ctx.request_context.lifespan_context.connector
 
     results = await connector.hybrid_search(
@@ -559,8 +649,25 @@ async def criminal_law_hybrid_search(
         limit=limit,
         filter_expr=filter_expr,
     )
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_law_hybrid_search, retrying without filter_expr")
+        try:
+            results = await connector.hybrid_search(
+                collection=connector.criminal_law_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None,
+            )
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in criminal_law_hybrid_search: %s",
+                e)
 
-    return format_grouped_sources(results)
+    response = format_grouped_sources(results)
+    logger.info("Finished tool criminal_law_hybrid_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.resource("data://civil-code-contents")
@@ -749,12 +856,29 @@ async def civil_code_query(
     
     3. 第三编包含"第三编 合同编 第一分编 通则"、"第三编 合同编 第二分编 典型合同"、"第三编 合同编 第三分编 准合同"。
     """
+    logger.info("Calling tool civil_code_query, params: %s",
+                _preview({"filter_expr": filter_expr, "limit": limit}))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.query(collection=connector.civil_code_collection,
                                     filter_expr=filter_expr,
                                     limit=limit)
+    if not results:
+        logger.info(
+            "First search returned empty in civil_code_query, retrying without filter_expr")
+        try:
+            results = await connector.query(
+                collection=connector.civil_code_collection,
+                filter_expr=None,
+                limit=limit)
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in civil_code_query: %s",
+                e)
 
-    return format_grouped_sources(results)
+    response = format_grouped_sources(results)
+    logger.info("Finished tool civil_code_query, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -795,13 +919,37 @@ async def civil_code_sparse_search(
 
     2. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以设为 20。
     """
+    logger.info(
+        "Calling tool civil_code_sparse_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+        }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
         collection=connector.civil_code_collection,
         query_text=query_text,
         limit=limit,
         filter_expr=filter_expr)
-    return format_grouped_sources(results)
+    if not results:
+        logger.info(
+            "First search returned empty in civil_code_sparse_search, retrying without filter_expr")
+        try:
+            results = await connector.sparse_search(
+                collection=connector.civil_code_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None)
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in civil_code_sparse_search: %s",
+                e)
+
+    response = format_grouped_sources(results)
+    logger.info("Finished tool civil_code_sparse_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -842,14 +990,37 @@ async def civil_code_dense_search(
 
     2. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以设为 20。
     """
+    logger.info(
+        "Calling tool civil_code_dense_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+        }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(
         collection=connector.civil_code_collection,
         query_text=query_text,
         limit=limit,
         filter_expr=filter_expr)
+    if not results:
+        logger.info(
+            "First search returned empty in civil_code_dense_search, retrying without filter_expr")
+        try:
+            results = await connector.dense_search(
+                collection=connector.civil_code_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None)
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in civil_code_dense_search: %s",
+                e)
 
-    return format_grouped_sources(results)
+    response = format_grouped_sources(results)
+    logger.info("Finished tool civil_code_dense_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -890,6 +1061,13 @@ async def civil_code_hybrid_search(
 
     2. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以设为 20。
     """
+    logger.info(
+        "Calling tool civil_code_hybrid_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+        }))
     connector = ctx.request_context.lifespan_context.connector
 
     results = await connector.hybrid_search(
@@ -898,8 +1076,25 @@ async def civil_code_hybrid_search(
         limit=limit,
         filter_expr=filter_expr,
     )
+    if not results:
+        logger.info(
+            "First search returned empty in civil_code_hybrid_search, retrying without filter_expr")
+        try:
+            results = await connector.hybrid_search(
+                collection=connector.civil_code_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None,
+            )
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in civil_code_hybrid_search: %s",
+                e)
 
-    return format_grouped_sources(results)
+    response = format_grouped_sources(results)
+    logger.info("Finished tool civil_code_hybrid_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.custom_route("/health", methods=["GET"])

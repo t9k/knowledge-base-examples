@@ -23,8 +23,15 @@ from openai import OpenAI
 import torch
 import torch_gcu
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("FastMCP.__main__")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setLevel(logging.INFO)
+    _handler.setFormatter(
+        logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    logger.addHandler(_handler)
+logger.propagate = False
 
 
 class MilvusConnector:
@@ -499,6 +506,20 @@ def _get_field(item, key):
             return None
 
 
+def _preview(value, max_len: int = 2000) -> str:
+    """将对象安全地转为字符串并限制最大长度，避免日志过长。"""
+    try:
+        if isinstance(value, str):
+            s = value
+        else:
+            s = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        s = str(value)
+    if len(s) > max_len:
+        return f"{s[:max_len]}... (truncated, total_length={len(s)})"
+    return s
+
+
 def format_grouped_sources(results: list[dict], group_field: str) -> str:
     """将检索结果按指定字段分组（民事：case_number；刑事：fact_id），输出 <source> 块。"""
     groups: dict[str, dict[str, list]] = defaultdict(lambda: {
@@ -511,12 +532,14 @@ def format_grouped_sources(results: list[dict], group_field: str) -> str:
         if name is None:
             # 跳过缺少分组键的条目
             continue
-        chunk_text = _get_field(item, "chunk")
+        # 当 parent_child=True 时，connector 会在结果上填充 parent_chunk。
+        # 此处若存在 parent_chunk，则优先使用父文档内容，否则回退到子 chunk。
+        chunk_text = _get_field(item, "parent_chunk") or _get_field(item, "chunk")
         distance = _get_field(item, "distance")
-        if chunk_text is not None:
+        if chunk_text is not None and chunk_text not in groups[name]["document"]:
             groups[name]["document"].append(chunk_text)
-        if distance is not None:
-            groups[name]["distances"].append(distance)
+            if distance is not None:
+                groups[name]["distances"].append(distance)
 
     output_parts: list[str] = []
     for i, (name, payload) in enumerate(groups.items(), start=1):
@@ -620,13 +643,27 @@ async def criminal_case_query(
         示例：'numbers like "%16.8万元%"'
     - criminals_llm (VARCHAR): 犯罪人（通过 LLM 提取）
     """
+    logger.info("Calling tool criminal_case_query, params: %s",
+                _preview({"filter_expr": filter_expr, "limit": limit}))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.query(
         collection=connector.criminal_case_collection,
         filter_expr=filter_expr,
         limit=limit)
-
-    return format_grouped_sources(results, group_field="fact_id")
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_case_query, retrying without filter_expr")
+        try:
+            results = await connector.query(
+                collection=connector.criminal_case_collection,
+                filter_expr=None,
+                limit=limit)
+        except Exception as e:
+            logger.warning("Retry without filter_expr failed in criminal_case_query: %s", e)
+    response = format_grouped_sources(results, group_field="fact_id")
+    logger.info("Finished tool criminal_case_query, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -673,6 +710,14 @@ async def criminal_case_sparse_search(
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
     """
+    logger.info(
+        "Calling tool criminal_case_sparse_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+            "parent_child": parent_child,
+        }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
         collection=connector.criminal_case_collection,
@@ -680,8 +725,22 @@ async def criminal_case_sparse_search(
         limit=limit,
         filter_expr=filter_expr,
         parent_child=parent_child)
-
-    return format_grouped_sources(results, group_field="fact_id")
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_case_sparse_search, retrying without filter_expr")
+        try:
+            results = await connector.sparse_search(
+                collection=connector.criminal_case_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None,
+                parent_child=parent_child)
+        except Exception as e:
+            logger.warning("Retry without filter_expr failed in criminal_case_sparse_search: %s", e)
+    response = format_grouped_sources(results, group_field="fact_id")
+    logger.info("Finished tool criminal_case_sparse_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -728,6 +787,14 @@ async def criminal_case_dense_search(
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
     """
+    logger.info(
+        "Calling tool criminal_case_dense_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+            "parent_child": parent_child,
+        }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(
         collection=connector.criminal_case_collection,
@@ -735,8 +802,22 @@ async def criminal_case_dense_search(
         limit=limit,
         filter_expr=filter_expr,
         parent_child=parent_child)
-
-    return format_grouped_sources(results, group_field="fact_id")
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_case_dense_search, retrying without filter_expr")
+        try:
+            results = await connector.dense_search(
+                collection=connector.criminal_case_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None,
+                parent_child=parent_child)
+        except Exception as e:
+            logger.warning("Retry without filter_expr failed in criminal_case_dense_search: %s", e)
+    response = format_grouped_sources(results, group_field="fact_id")
+    logger.info("Finished tool criminal_case_dense_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -783,6 +864,14 @@ async def criminal_case_hybrid_search(
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
     """
+    logger.info(
+        "Calling tool criminal_case_hybrid_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+            "parent_child": parent_child,
+        }))
     connector = ctx.request_context.lifespan_context.connector
 
     results = await connector.hybrid_search(
@@ -792,8 +881,23 @@ async def criminal_case_hybrid_search(
         filter_expr=filter_expr,
         parent_child=parent_child,
     )
-
-    return format_grouped_sources(results, group_field="fact_id")
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_case_hybrid_search, retrying without filter_expr")
+        try:
+            results = await connector.hybrid_search(
+                collection=connector.criminal_case_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None,
+                parent_child=parent_child,
+            )
+        except Exception as e:
+            logger.warning("Retry without filter_expr failed in criminal_case_hybrid_search: %s", e)
+    response = format_grouped_sources(results, group_field="fact_id")
+    logger.info("Finished tool criminal_case_hybrid_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -832,12 +936,26 @@ async def civil_case_query(
         示例：'numbers like "%16.8万元%"'
     - parties_llm (VARCHAR): 当事人（通过 LLM 提取）
     """
+    logger.info("Calling tool civil_case_query, params: %s",
+                _preview({"filter_expr": filter_expr, "limit": limit}))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.query(collection=connector.civil_case_collection,
                                     filter_expr=filter_expr,
                                     limit=limit)
-
-    return format_grouped_sources(results, group_field="case_number")
+    if not results:
+        logger.info(
+            "First search returned empty in civil_case_query, retrying without filter_expr")
+        try:
+            results = await connector.query(
+                collection=connector.civil_case_collection,
+                filter_expr=None,
+                limit=limit)
+        except Exception as e:
+            logger.warning("Retry without filter_expr failed in civil_case_query: %s", e)
+    response = format_grouped_sources(results, group_field="case_number")
+    logger.info("Finished tool civil_case_query, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -885,6 +1003,14 @@ async def civil_case_sparse_search(
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
     """
+    logger.info(
+        "Calling tool civil_case_sparse_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+            "parent_child": parent_child,
+        }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
         collection=connector.civil_case_collection,
@@ -892,8 +1018,22 @@ async def civil_case_sparse_search(
         limit=limit,
         filter_expr=filter_expr,
         parent_child=parent_child)
-
-    return format_grouped_sources(results, group_field="case_number")
+    if not results:
+        logger.info(
+            "First search returned empty in civil_case_sparse_search, retrying without filter_expr")
+        try:
+            results = await connector.sparse_search(
+                collection=connector.civil_case_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None,
+                parent_child=parent_child)
+        except Exception as e:
+            logger.warning("Retry without filter_expr failed in civil_case_sparse_search: %s", e)
+    response = format_grouped_sources(results, group_field="case_number")
+    logger.info("Finished tool civil_case_sparse_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -941,6 +1081,14 @@ async def civil_case_dense_search(
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
     """
+    logger.info(
+        "Calling tool civil_case_dense_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+            "parent_child": parent_child,
+        }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(
         collection=connector.civil_case_collection,
@@ -948,8 +1096,22 @@ async def civil_case_dense_search(
         limit=limit,
         filter_expr=filter_expr,
         parent_child=parent_child)
-
-    return format_grouped_sources(results, group_field="case_number")
+    if not results:
+        logger.info(
+            "First search returned empty in civil_case_dense_search, retrying without filter_expr")
+        try:
+            results = await connector.dense_search(
+                collection=connector.civil_case_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None,
+                parent_child=parent_child)
+        except Exception as e:
+            logger.warning("Retry without filter_expr failed in civil_case_dense_search: %s", e)
+    response = format_grouped_sources(results, group_field="case_number")
+    logger.info("Finished tool civil_case_dense_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.tool()
@@ -997,6 +1159,14 @@ async def civil_case_hybrid_search(
 
     1. parent_child 参数默认取 False，当需要参考更完整的上下文时，设为 True 以返回父文档的 chunk。
     """
+    logger.info(
+        "Calling tool civil_case_hybrid_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+            "parent_child": parent_child,
+        }))
     connector = ctx.request_context.lifespan_context.connector
 
     results = await connector.hybrid_search(
@@ -1006,8 +1176,25 @@ async def civil_case_hybrid_search(
         filter_expr=filter_expr,
         parent_child=parent_child,
     )
+    if not results:
+        logger.info(
+            "First search returned empty in civil_case_hybrid_search, retrying without filter_expr")
+        try:
+            results = await connector.hybrid_search(
+                collection=connector.civil_case_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None,
+                parent_child=parent_child,
+            )
+        except Exception as e:
+            logger.warning("Retry without filter_expr failed in civil_case_hybrid_search: %s", e)
 
-    return format_grouped_sources(results, group_field="case_number")
+    
+    response = format_grouped_sources(results, group_field="case_number")
+    logger.info("Finished tool civil_case_hybrid_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.custom_route("/health", methods=["GET"])
