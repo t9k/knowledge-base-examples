@@ -1,14 +1,14 @@
 # 蓝绿部署工作流（法律）
 
-本工作流使用 Argo Workflows、Milvus 和嵌入模型实现[法律数据](https://modelsphere.nc201.t9kcloud.cn/datasets/xyx/cn-laws)的蓝绿部署流程。
+本工作流使用 Argo Workflows、Milvus 和嵌入模型实现[法律数据](https://modelsphere.qy.t9kcloud.cn/datasets/t9k-ai/cn-laws)的蓝绿部署流程。
 
 ## 概述
 
 工作流执行以下步骤：
 
 1. **准备（prepare）**：检查参数格式，拉取后续步骤要执行的脚本
-2. **下载文件（download）**：从 Model Sphere 下载刑事案件数据文件
-3. **插入数据（db_insert）**：创建新的 Milvus Database，以及其下的两个 Collection；处理案例数据文件：按 Markdown 标题和法条分段、提取元数据、创建嵌入向量，并将数据插入到 Database 下的 Collection 中
+2. **下载文件（download）**：从 Model Sphere 下载法律数据文件
+3. **插入数据（db_insert）**：创建新的 Milvus Database，以及其下的一个 Collection；处理法律数据文件：按 Markdown 标题和法条分段、提取元数据、创建嵌入向量，并将数据插入到 Database 下的 Collection 中
 
 ## 文件说明
 
@@ -24,6 +24,7 @@
 
 - `database-name`：Milvus Database 名称
 - `collection-name`：Milvus Collection 名称
+- `file-path`：法律数据文件路径
 
 ConfigMap bg-deploy-law-config 包含以下环境变量：
 

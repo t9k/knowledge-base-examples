@@ -37,14 +37,17 @@ logger.propagate = False
 class MilvusConnector:
 
     def __init__(self, uri: str, token: str, db_name: str,
-                 law_collection_name: str, embedding_base_url: str,
+                 criminal_law_collection_name: str,
+                 civil_code_collection_name: str, embedding_base_url: str,
                  embedding_model: str):
         self.uri = uri
         self.token = token
         connections.connect(uri=uri, token=token, db_name=db_name)
-        self.law_collection = Collection(law_collection_name)
+        self.criminal_law_collection = Collection(criminal_law_collection_name)
+        self.civil_code_collection = Collection(civil_code_collection_name)
         self.check_collections()
-        self.law_collection.load()
+        self.criminal_law_collection.load()
+        self.civil_code_collection.load()
 
         self.output_fields = [
             "chunk", "law", "part", "chapter", "section", "article"
@@ -100,7 +103,9 @@ class MilvusConnector:
         ]
 
         # Check both collections
-        for collection in [self.law_collection]:
+        for collection in [
+                self.criminal_law_collection, self.civil_code_collection
+        ]:
             schema = collection.describe()
             actual_fields = schema['fields']
 
@@ -291,9 +296,7 @@ def format_grouped_sources(results: list[dict]) -> str:
     output_parts: list[str] = []
     for i, (name, payload) in enumerate(groups.items(), start=1):
         block = {
-            "source": {
-                "name": name
-            },
+            "source": {"name": name},
             "document": payload["document"],
             "distances": payload["distances"],
         }
@@ -317,7 +320,10 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[MilvusContext]:
         uri=config.get("milvus_uri", "http://localhost:19530"),
         token=config.get("milvus_token"),
         db_name=config.get("db_name", "default"),
-        law_collection_name=config.get("law_collection_name", "cn_law"),
+        criminal_law_collection_name=config.get("criminal_law_collection_name",
+                                                "criminal_law"),
+        civil_code_collection_name=config.get("civil_code_collection_name",
+                                              "civil_code"),
         embedding_base_url=config.get("embedding_base_url"),
         embedding_model=config.get("embedding_model"),
     )
@@ -410,6 +416,258 @@ async def criminal_law_contents() -> str:
 
 附则
 """
+
+
+@mcp.tool()
+async def criminal_law_query(
+    filter_expr: Annotated[
+        str,
+        Field(description=(
+            "Filter expression, e.g. 'law == \"中华人民共和国刑法\" and "
+            "article == 123', 'law like \"%十一%\" and article_amended == 338'"
+        ))],
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=100
+              )] = 5,
+    ctx: Context = None,
+) -> str:
+    """
+    使用过滤表达式查询刑法 Collection。
+
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 刑法及其修正案的名称
+    - part (VARCHAR): 编
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+    - article_amended (INT64): 所修改的刑法中的条（仅适用于刑法修正案）
+
+    注意：
+  
+    1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
+    "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
+    """
+    logger.info("Calling tool criminal_law_query, params: %s",
+                _preview({"filter_expr": filter_expr, "limit": limit}))
+    connector = ctx.request_context.lifespan_context.connector
+    results = await connector.query(
+        collection=connector.criminal_law_collection,
+        filter_expr=filter_expr,
+        limit=limit)
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_law_query, retrying without filter_expr")
+        try:
+            results = await connector.query(
+                collection=connector.criminal_law_collection,
+                filter_expr=None,
+                limit=limit)
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in criminal_law_query: %s",
+                e)
+
+    response = format_grouped_sources(results)
+    logger.info("Finished tool criminal_law_query, response preview: %s",
+                _preview(response, 1000))
+    return response
+
+
+@mcp.tool()
+async def criminal_law_sparse_search(
+    query_text: Annotated[str, Field(description="Text to search for")],
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=100
+              )] = 5,
+    filter_expr: Annotated[
+        Optional[str],
+        Field(description=(
+            "Optional filter expression for metadata filtering, e.g. "
+            "'chapter like \"第三章%\"', 'section == \"走私罪\"'"))] = None,
+    ctx: Context = None,
+) -> str:
+    """
+    稀疏检索刑法 Collection。适用于专有名词。
+
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 刑法及其修正案的名称
+    - part (VARCHAR): 编
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+    - article_amended (INT64): 所修改的刑法中的条（仅适用于刑法修正案）
+
+    注意：
+  
+    1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
+    "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
+    """
+    logger.info(
+        "Calling tool criminal_law_sparse_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+        }))
+    connector = ctx.request_context.lifespan_context.connector
+    results = await connector.sparse_search(
+        collection=connector.criminal_law_collection,
+        query_text=query_text,
+        limit=limit,
+        filter_expr=filter_expr)
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_law_sparse_search, retrying without filter_expr")
+        try:
+            results = await connector.sparse_search(
+                collection=connector.criminal_law_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None)
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in criminal_law_sparse_search: %s",
+                e)
+
+    response = format_grouped_sources(results)
+    logger.info("Finished tool criminal_law_sparse_search, response preview: %s",
+                _preview(response, 1000))
+    return response
+
+
+@mcp.tool()
+async def criminal_law_dense_search(
+    query_text: Annotated[str, Field(description="Text to search for")],
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=100
+              )] = 5,
+    filter_expr: Annotated[
+        Optional[str],
+        Field(description=(
+            "Optional filter expression for metadata filtering, e.g. "
+            "'chapter like \"第三章%\"', 'section == \"走私罪\"'"))] = None,
+    ctx: Context = None,
+) -> str:
+    """
+    密集检索刑法 Collection。适用于基于语义的检索。
+
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 刑法及其修正案的名称
+    - part (VARCHAR): 编
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+    - article_amended (INT64): 所修改的刑法中的条（仅适用于刑法修正案）
+
+    注意：
+  
+    1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
+    "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
+    """
+    logger.info(
+        "Calling tool criminal_law_dense_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+        }))
+    connector = ctx.request_context.lifespan_context.connector
+    results = await connector.dense_search(
+        collection=connector.criminal_law_collection,
+        query_text=query_text,
+        limit=limit,
+        filter_expr=filter_expr)
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_law_dense_search, retrying without filter_expr")
+        try:
+            results = await connector.dense_search(
+                collection=connector.criminal_law_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None)
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in criminal_law_dense_search: %s",
+                e)
+
+    response = format_grouped_sources(results)
+    logger.info("Finished tool criminal_law_dense_search, response preview: %s",
+                _preview(response, 1000))
+    return response
+
+
+@mcp.tool()
+async def criminal_law_hybrid_search(
+    query_text: Annotated[str, Field(description="Text to search for")],
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=100
+              )] = 5,
+    filter_expr: Annotated[
+        Optional[str],
+        Field(description=(
+            "Optional filter expression for metadata filtering, e.g. "
+            "'chapter like \"第三章%\"', 'section == \"走私罪\"'"))] = None,
+    ctx: Context = None,
+) -> str:
+    """
+    混合检索刑法 Collection。适用于大多数情况。
+
+    Collection 字段（元数据）说明：
+
+    - law (VARCHAR): 刑法及其修正案的名称
+    - part (VARCHAR): 编
+    - chapter (VARCHAR): 章
+    - section (VARCHAR): 节
+    - article (INT64): 条
+    - article_amended (INT64): 所修改的刑法中的条（仅适用于刑法修正案）
+
+    注意：
+
+    1. 刑法有十二部修正案，分别名为"中华人民共和国刑法修正案"、"中华人民共和国刑法修正案（二）"、
+    "中华人民共和国刑法修正案（三）"、……、"中华人民共和国刑法修正案（十二）"。
+    """
+    logger.info(
+        "Calling tool criminal_law_hybrid_search, params: %s",
+        _preview({
+            "query_text": query_text,
+            "limit": limit,
+            "filter_expr": filter_expr,
+        }))
+    connector = ctx.request_context.lifespan_context.connector
+
+    results = await connector.hybrid_search(
+        collection=connector.criminal_law_collection,
+        query_text=query_text,
+        limit=limit,
+        filter_expr=filter_expr,
+    )
+    if not results:
+        logger.info(
+            "First search returned empty in criminal_law_hybrid_search, retrying without filter_expr")
+        try:
+            results = await connector.hybrid_search(
+                collection=connector.criminal_law_collection,
+                query_text=query_text,
+                limit=limit,
+                filter_expr=None,
+            )
+        except Exception as e:
+            logger.warning(
+                "Retry without filter_expr failed in criminal_law_hybrid_search: %s",
+                e)
+
+    response = format_grouped_sources(results)
+    logger.info("Finished tool criminal_law_hybrid_search, response preview: %s",
+                _preview(response, 1000))
+    return response
 
 
 @mcp.resource("data://civil-code-contents")
@@ -564,87 +822,105 @@ async def civil_code_contents() -> str:
 
 
 @mcp.tool()
-async def law_query(
+async def civil_code_query(
     filter_expr: Annotated[
         str,
         Field(description=(
-            "Filter expression, e.g. 'law == \"中华人民共和国刑法\" and "
-            "article == 123', 'law like \"%十一%\" and article_amended == 338'"
-        ))],
+            "Filter expression, e.g. 'part == \"第一编 总则\" and article == 123', "
+            "'part like \"%第二编%第二分编%\" and article == 345'"))],
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 20,
+              )] = 5,
     ctx: Context = None,
 ) -> str:
     """
-    使用过滤表达式查询法律 Collection。
+    使用过滤表达式查询民法典 Collection。
 
     Collection 字段（元数据）说明：
 
-    - law (VARCHAR): 法律名称
-    - part (VARCHAR): 编（仅适用于刑法、民法典、刑事诉讼法、民事诉讼法）
+    - law (VARCHAR): 民法典的名称
+    - part (VARCHAR): 编（包含分编）
     - chapter (VARCHAR): 章
     - section (VARCHAR): 节
     - article (INT64): 条
-    - article_amended (INT64): 所修改的刑法中的条（仅适用于宪法修正案、刑法修正案）
+
+    注意：
+  
+    1. 民法典分为"第一编 总则"、"第二编 物权编%"、"第三编 合同编%"、"第四编 人格权编"、"第五编 婚姻家庭编"、
+    "第六编 继承编"、"第七编 侵权责任编"、"第八编 附则"，其中第二编、第三编下还有分编，因此需要在末尾添加"%"
+    以匹配所有分编。
+    
+    2. 第二编包含"第二编 物权编 第一分编 通则"、"第二编 物权编 第二分编 所有权"、"第二编 物权编 第三分编 用益物权"、
+    "第二编 物权编 第四分编 担保物权"、"第二编 物权编 第五分编 占有"。
+    
+    3. 第三编包含"第三编 合同编 第一分编 通则"、"第三编 合同编 第二分编 典型合同"、"第三编 合同编 第三分编 准合同"。
     """
-    logger.info("Calling tool law_query, params: %s",
-                _preview({
-                    "filter_expr": filter_expr,
-                    "limit": limit
-                }))
+    logger.info("Calling tool civil_code_query, params: %s",
+                _preview({"filter_expr": filter_expr, "limit": limit}))
     connector = ctx.request_context.lifespan_context.connector
-    results = await connector.query(collection=connector.law_collection,
+    results = await connector.query(collection=connector.civil_code_collection,
                                     filter_expr=filter_expr,
                                     limit=limit)
     if not results:
         logger.info(
-            "First search returned empty in law_query, retrying without filter_expr"
-        )
+            "First search returned empty in civil_code_query, retrying without filter_expr")
         try:
             results = await connector.query(
-                collection=connector.law_collection,
+                collection=connector.civil_code_collection,
                 filter_expr=None,
                 limit=limit)
         except Exception as e:
-            logger.warning("Retry without filter_expr failed in law_query: %s",
-                           e)
+            logger.warning(
+                "Retry without filter_expr failed in civil_code_query: %s",
+                e)
 
     response = format_grouped_sources(results)
-    logger.info("Finished tool law_query, response preview: %s",
+    logger.info("Finished tool civil_code_query, response preview: %s",
                 _preview(response, 1000))
     return response
 
 
 @mcp.tool()
-async def law_sparse_search(
+async def civil_code_sparse_search(
     query_text: Annotated[str, Field(description="Text to search for")],
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 20,
+              )] = 10,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
             "Optional filter expression for metadata filtering, e.g. "
-            "'chapter like \"%第三章%\"', 'section == \"%走私罪%\"'"))] = None,
+            "'part like \"%婚姻家庭编%\"', 'chapter like \"%肖像权%\"'"))] = None,
     ctx: Context = None,
 ) -> str:
     """
-    稀疏检索法律 Collection。
+    稀疏检索民法典 Collection。适用于专有名词。
 
     Collection 字段（元数据）说明：
 
-    - law (VARCHAR): 法律名称
-    - part (VARCHAR): 编（仅适用于刑法、民法典、刑事诉讼法、民事诉讼法）
+    - law (VARCHAR): 民法典的名称
+    - part (VARCHAR): 编（包含分编）
     - chapter (VARCHAR): 章
     - section (VARCHAR): 节
     - article (INT64): 条
-    - article_amended (INT64): 所修改的刑法中的条（仅适用于宪法修正案、刑法修正案）
+
+    注意：
+  
+    1. 民法典分为"第一编 总则"、"第二编 物权编%"、"第三编 合同编%"、"第四编 人格权编"、"第五编 婚姻家庭编"、
+    "第六编 继承编"、"第七编 侵权责任编"、"第八编 附则"，其中第二编、第三编下还有分编，因此需要在末尾添加"%"
+    以匹配所有分编。
+    
+    2. 第二编包含"第二编 物权编 第一分编 通则"、"第二编 物权编 第二分编 所有权"、"第二编 物权编 第三分编 用益物权"、
+    "第二编 物权编 第四分编 担保物权"、"第二编 物权编 第五分编 占有"。
+    
+    3. 第三编包含"第三编 合同编 第一分编 通则"、"第三编 合同编 第二分编 典型合同"、"第三编 合同编 第三分编 准合同"。
+
+    2. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以设为 20。
     """
     logger.info(
-        "Calling tool law_sparse_search, params: %s",
+        "Calling tool civil_code_sparse_search, params: %s",
         _preview({
             "query_text": query_text,
             "limit": limit,
@@ -652,116 +928,141 @@ async def law_sparse_search(
         }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
-        collection=connector.law_collection,
+        collection=connector.civil_code_collection,
         query_text=query_text,
         limit=limit,
         filter_expr=filter_expr)
     if not results:
         logger.info(
-            "First search returned empty in law_sparse_search, retrying without filter_expr"
-        )
+            "First search returned empty in civil_code_sparse_search, retrying without filter_expr")
         try:
             results = await connector.sparse_search(
-                collection=connector.law_collection,
+                collection=connector.civil_code_collection,
                 query_text=query_text,
                 limit=limit,
                 filter_expr=None)
         except Exception as e:
             logger.warning(
-                "Retry without filter_expr failed in law_sparse_search: %s", e)
+                "Retry without filter_expr failed in civil_code_sparse_search: %s",
+                e)
 
     response = format_grouped_sources(results)
-    logger.info("Finished tool law_sparse_search, response preview: %s",
+    logger.info("Finished tool civil_code_sparse_search, response preview: %s",
                 _preview(response, 1000))
     return response
 
 
 @mcp.tool()
-async def law_dense_search(
+async def civil_code_dense_search(
     query_text: Annotated[str, Field(description="Text to search for")],
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 20,
+              )] = 10,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
             "Optional filter expression for metadata filtering, e.g. "
-            "'chapter like \"%第三章%\"', 'section == \"%走私罪%\"'"))] = None,
+            "'part like \"%婚姻家庭编%\"', 'chapter like \"%肖像权%\"'"))] = None,
     ctx: Context = None,
 ) -> str:
     """
-    密集检索法律 Collection。
+    密集检索民法典 Collection。适用于基于语义的检索。
 
     Collection 字段（元数据）说明：
 
-    - law (VARCHAR): 法律名称
-    - part (VARCHAR): 编（仅适用于刑法、民法典、刑事诉讼法、民事诉讼法）
+    - law (VARCHAR): 民法典的名称
+    - part (VARCHAR): 编（包含分编）
     - chapter (VARCHAR): 章
     - section (VARCHAR): 节
     - article (INT64): 条
-    - article_amended (INT64): 所修改的刑法中的条（仅适用于宪法修正案、刑法修正案）
+
+    注意：
+  
+    1. 民法典分为"第一编 总则"、"第二编 物权编%"、"第三编 合同编%"、"第四编 人格权编"、"第五编 婚姻家庭编"、
+    "第六编 继承编"、"第七编 侵权责任编"、"第八编 附则"，其中第二编、第三编下还有分编，因此需要在末尾添加"%"
+    以匹配所有分编。
+    
+    2. 第二编包含"第二编 物权编 第一分编 通则"、"第二编 物权编 第二分编 所有权"、"第二编 物权编 第三分编 用益物权"、
+    "第二编 物权编 第四分编 担保物权"、"第二编 物权编 第五分编 占有"。
+    
+    3. 第三编包含"第三编 合同编 第一分编 通则"、"第三编 合同编 第二分编 典型合同"、"第三编 合同编 第三分编 准合同"。
+
+    2. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以设为 20。
     """
     logger.info(
-        "Calling tool law_dense_search, params: %s",
+        "Calling tool civil_code_dense_search, params: %s",
         _preview({
             "query_text": query_text,
             "limit": limit,
             "filter_expr": filter_expr,
         }))
     connector = ctx.request_context.lifespan_context.connector
-    results = await connector.dense_search(collection=connector.law_collection,
-                                           query_text=query_text,
-                                           limit=limit,
-                                           filter_expr=filter_expr)
+    results = await connector.dense_search(
+        collection=connector.civil_code_collection,
+        query_text=query_text,
+        limit=limit,
+        filter_expr=filter_expr)
     if not results:
         logger.info(
-            "First search returned empty in law_dense_search, retrying without filter_expr"
-        )
+            "First search returned empty in civil_code_dense_search, retrying without filter_expr")
         try:
             results = await connector.dense_search(
-                collection=connector.law_collection,
+                collection=connector.civil_code_collection,
                 query_text=query_text,
                 limit=limit,
                 filter_expr=None)
         except Exception as e:
             logger.warning(
-                "Retry without filter_expr failed in law_dense_search: %s", e)
+                "Retry without filter_expr failed in civil_code_dense_search: %s",
+                e)
 
     response = format_grouped_sources(results)
-    logger.info("Finished tool law_dense_search, response preview: %s",
+    logger.info("Finished tool civil_code_dense_search, response preview: %s",
                 _preview(response, 1000))
     return response
 
 
 @mcp.tool()
-async def law_hybrid_search(
+async def civil_code_hybrid_search(
     query_text: Annotated[str, Field(description="Text to search for")],
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 20,
+              )] = 10,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
             "Optional filter expression for metadata filtering, e.g. "
-            "'chapter like \"%第三章%\"', 'section == \"%走私罪%\"'"))] = None,
+            "'part like \"%婚姻家庭编%\"', 'chapter like \"%肖像权%\"'"))] = None,
     ctx: Context = None,
 ) -> str:
     """
-    混合检索法律 Collection。
+    混合检索民法典 Collection。适用于大多数情况。
 
     Collection 字段（元数据）说明：
 
-    - law (VARCHAR): 法律名称
-    - part (VARCHAR): 编（仅适用于刑法、民法典、刑事诉讼法、民事诉讼法）
+    - law (VARCHAR): 民法典的名称
+    - part (VARCHAR): 编（包含分编）
     - chapter (VARCHAR): 章
     - section (VARCHAR): 节
     - article (INT64): 条
-    - article_amended (INT64): 所修改的刑法中的条（仅适用于宪法修正案、刑法修正案）
+
+    注意：
+  
+    1. 民法典分为"第一编 总则"、"第二编 物权编%"、"第三编 合同编%"、"第四编 人格权编"、"第五编 婚姻家庭编"、
+    "第六编 继承编"、"第七编 侵权责任编"、"第八编 附则"，其中第二编、第三编下还有分编，因此需要在末尾添加"%"
+    以匹配所有分编。
+    
+    2. 第二编包含"第二编 物权编 第一分编 通则"、"第二编 物权编 第二分编 所有权"、"第二编 物权编 第三分编 用益物权"、
+    "第二编 物权编 第四分编 担保物权"、"第二编 物权编 第五分编 占有"。
+    
+    3. 第三编包含"第三编 合同编 第一分编 通则"、"第三编 合同编 第二分编 典型合同"、"第三编 合同编 第三分编 准合同"。
+
+    2. limit 参数默认取 10，当需要针对某个问题或主题，检索全面、详细的信息时，可以设为 20。
     """
     logger.info(
-        "Calling tool law_hybrid_search, params: %s",
+        "Calling tool civil_code_hybrid_search, params: %s",
         _preview({
             "query_text": query_text,
             "limit": limit,
@@ -770,28 +1071,28 @@ async def law_hybrid_search(
     connector = ctx.request_context.lifespan_context.connector
 
     results = await connector.hybrid_search(
-        collection=connector.law_collection,
+        collection=connector.civil_code_collection,
         query_text=query_text,
         limit=limit,
         filter_expr=filter_expr,
     )
     if not results:
         logger.info(
-            "First search returned empty in law_hybrid_search, retrying without filter_expr"
-        )
+            "First search returned empty in civil_code_hybrid_search, retrying without filter_expr")
         try:
             results = await connector.hybrid_search(
-                collection=connector.law_collection,
+                collection=connector.civil_code_collection,
                 query_text=query_text,
                 limit=limit,
                 filter_expr=None,
             )
         except Exception as e:
             logger.warning(
-                "Retry without filter_expr failed in law_hybrid_search: %s", e)
+                "Retry without filter_expr failed in civil_code_hybrid_search: %s",
+                e)
 
     response = format_grouped_sources(results)
-    logger.info("Finished tool law_hybrid_search, response preview: %s",
+    logger.info("Finished tool civil_code_hybrid_search, response preview: %s",
                 _preview(response, 1000))
     return response
 
@@ -811,12 +1112,20 @@ if __name__ == "__main__":
     load_dotenv()
     args = parse_arguments()
     mcp.config = {
-        "milvus_uri": os.environ.get("MILVUS_URI"),
-        "milvus_token": os.environ.get("MILVUS_TOKEN"),
-        "db_name": os.environ.get("MILVUS_DB"),
-        "law_collection_name": os.environ.get("MILVUS_COLLECTION"),
-        "embedding_base_url": os.environ.get("EMBEDDING_BASE_URL"),
-        "embedding_model": os.environ.get("EMBEDDING_MODEL"),
+        "milvus_uri":
+        os.environ.get("MILVUS_URI"),
+        "milvus_token":
+        os.environ.get("MILVUS_TOKEN"),
+        "db_name":
+        os.environ.get("MILVUS_DB"),
+        "criminal_law_collection_name":
+        os.environ.get("MILVUS_COLLECTION_CRIMINAL_LAW"),
+        "civil_code_collection_name":
+        os.environ.get("MILVUS_COLLECTION_CIVIL_CODE"),
+        "embedding_base_url":
+        os.environ.get("EMBEDDING_BASE_URL"),
+        "embedding_model":
+        os.environ.get("EMBEDDING_MODEL"),
     }
 
     ef = BGEM3EmbeddingFunction(use_fp16=False, device="gcu")

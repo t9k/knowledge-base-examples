@@ -76,80 +76,17 @@ python preprocess_judgment_docs.py
 - 文件总大小为 3.97 GiB
 - 文本总长度（以 python 的 `len()` 函数测量的字符数）为 5,336,145,891，平均长度为 3,120
 
-### 刑法
+### 法律法规
 
-拉取 <https://github.com/Oreomeow/Law-Book> 项目，复制其中的刑法文档：
-
-```bash
-git clone https://github.com/Oreomeow/Law-Book.git
-cp Law-Book/7-刑法/刑法* .
-rm -rf Law-Book
-```
-
-**数据预处理**
-
-做以下手工修改：
-
-补充刑法修改案十二：创建文件刑法修正案12.md，内容复制自 <http://www.npc.gov.cn/npc/c2/c30834/202312/t20231229_433988.html>，格式参照刑法修正案11.md
-
-预处理后的刑法文档放置在 <https://modelsphere.nc201.t9kcloud.cn/datasets/xyx/cn-laws/files/main/criminal-law>。
+参见 [t9k-ai/cn-laws](https://modelsphere.qy.t9kcloud.cn/datasets/t9k-ai/cn-laws) 数据集的介绍。
 
 **数据规模**
 
-刑法和 12 个刑法修正案共 13 个 md 文件：
+法律法规共 1,433 个 md 文件：
 
-- 共有 1,831 行（空行不计入）
-- 文件总大小为 360KB
-- 文本总长度（以 python 的 `len()` 函数测量的字符数）为 116,115
-
-### 民法典
-
-拉取 <https://github.com/Oreomeow/Law-Book> 项目，复制其中的民法典文档：
-
-```bash
-git clone https://github.com/Oreomeow/Law-Book.git
-cp Law-Book/3-民法典/* .
-rm 0-README.md
-rm -rf Law-Book
-```
-
-**数据预处理**
-
-做以下手工修改和脚本处理：
-
-对于 `1-总则.md`，将下列行移动到“# 中华人民共和国民法典”之后，“# 总则“之前；对于其他文档，移除下列行：
-
-```markdown
-2020年5月28日 第十三届全国人民代表大会第三次会议通过
-
-2021年1月1日 施行
-
-<!-- INFO END -->
-```
-
-对于 `8-附则.md`，移除下列行：
-
-```markdown
-##
-```
-
-在 md 文件的同一目录下创建预处理脚本 [`civil_code_formatter.py`](./civil_code_formatter.py) 并执行：
-
-```bash
-python civil_code_formatter.py .
-```
-
-修改文件名：`1-总则.md` => `民法典1总则.md`，`2-物权编.md` => `民法典2物权编.md`，以此类推。
-
-预处理后的民法典文档放置在 <https://modelsphere.nc201.t9kcloud.cn/datasets/xyx/cn-laws/files/main/civil-code>。
-
-**数据规模**
-
-民法典的 8 编共 8 个 md 文件：
-
-- 共有 2,272 行（空行不计入）
-- 文件总大小为 336KB
-- 文本总长度（以 python 的 `len()` 函数测量的字符数）为 112,480
+- 共有 144,632 行（空行不计入）
+- 文件总大小为 22MB
+- 文本总长度（以 python 的 `len()` 函数测量的字符数）为 7,869,601
 
 ## 数据处理与入库
 
@@ -157,16 +94,7 @@ python civil_code_formatter.py .
 
 ### 刑事案件
 
-运行脚本 [insert_data_cail2018.py](./insert_data_cail2018.py)：
-
-```bash
-HF_ENDPOINT=https://hf-mirror.com python insert_data_CAIL_2018.py \
-  --use-gcu \                  # 使用 gcu 进行 bge-m3 本地推理
-  --parent-child \             # 启用父子分段
-  --llm-extract \              # 启用 LLM 提取额外的元数据
-  --llm-workers 32 \           # 向 LLM 发送请求的工作器数量
-  ./final_all_data/exercise_contest/data_valid.json  # json 案例数据
-```
+脚本 [db_insert.py](../argo-workflows/bg-deploy-criminal-case/db_insert.py) 负责处理和入库刑事案件数据。
 
 **主要步骤**：
 
@@ -234,16 +162,7 @@ chunking、embedding 及 Milvus Collection 配置信息如下：
 
 ### 民事案件
 
-运行脚本 [insert_data_judgment_docs.py](./insert_data_judgment_docs.py)：
-
-```bash
-HF_ENDPOINT=https://hf-mirror.com python insert_data_judgment_docs.py \
-  --use-gcu \                  # 使用 gcu 进行 bge-m3 本地推理
-  --parent-child \             # 启用父子分段
-  --llm-extract \              # 启用 LLM 提取额外的元数据
-  --llm-workers 32 \           # 向 LLM 发送请求的工作器数量
-  ./judgment_docs/10000.csv    # csv 案例数据
-```
+脚本 [db_insert.py](../argo-workflows/bg-deploy-civil-case/db_insert.py) 负责处理和入库民事案件数据。
 
 **主要步骤**：
 
@@ -313,13 +232,7 @@ chunking、embedding 及 Milvus Collection 配置信息如下：
 
 ### 法律数据
 
-运行脚本 [insert_data_laws.py](./insert_data_laws.py)：
-
-```bash
-HF_ENDPOINT=https://hf-mirror.com python insert_data_laws.py \
-  --use-gcu \                  # 使用 gcu 进行 bge-m3 本地推理
-  ./cn-laws/criminal-law/      # 包含 markdown 法律数据的目录
-```
+脚本 [db_insert.py](../argo-workflows/bg-deploy-law/db_insert.py) 负责处理和入库法律数据。
 
 **主要步骤**：
 

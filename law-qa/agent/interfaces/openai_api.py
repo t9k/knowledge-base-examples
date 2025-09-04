@@ -5,6 +5,8 @@ import json
 import re
 import logging
 import os
+import threading
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +44,200 @@ except Exception:
         _fallback.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
         logger.addHandler(_fallback)
     logger.setLevel(logging.INFO)
+
+# =========================
+# 统计聚合（小时/天）
+# =========================
+_metrics_lock = threading.Lock()
+_metrics = {
+    'hour': {
+        'stream': {
+            'ttft_ms': [],
+            'total_ms': [],
+            'out_tokens': [],
+            'tps': [],
+        },
+        'non_stream': {
+            'total_ms': [],
+            'out_tokens': [],
+            'tps': [],
+        },
+        'count_stream': 0,
+        'count_non_stream': 0,
+        'period_start': datetime.now().replace(minute=0, second=0, microsecond=0),
+    },
+    'day': {
+        'stream': {
+            'ttft_ms': [],
+            'total_ms': [],
+            'out_tokens': [],
+            'tps': [],
+        },
+        'non_stream': {
+            'total_ms': [],
+            'out_tokens': [],
+            'tps': [],
+        },
+        'count_stream': 0,
+        'count_non_stream': 0,
+        'period_start': datetime.now().replace(hour=0, minute=0, second=0, microsecond=0),
+    }
+}
+
+
+def _percentile(sorted_vals: List[float], q: float) -> Optional[float]:
+    try:
+        n = len(sorted_vals)
+        if n == 0:
+            return None
+        if n == 1:
+            return float(sorted_vals[0])
+        pos = q * (n - 1)
+        lower = int(math.floor(pos))
+        upper = int(math.ceil(pos))
+        if lower == upper:
+            return float(sorted_vals[lower])
+        weight = pos - lower
+        return float(sorted_vals[lower] * (1 - weight) + sorted_vals[upper] * weight)
+    except Exception:
+        return None
+
+
+def _calc_stats(values: List[float]) -> Dict[str, Optional[float]]:
+    if not values:
+        return {'min': None, 'p50': None, 'p90': None, 'p99': None, 'max': None}
+    vals = sorted(values)
+    return {
+        'min': float(vals[0]),
+        'p50': _percentile(vals, 0.50),
+        'p90': _percentile(vals, 0.90),
+        'p99': _percentile(vals, 0.99),
+        'max': float(vals[-1]),
+    }
+
+
+def _reset_scope(scope: str) -> None:
+    now = datetime.now()
+    if scope == 'hour':
+        _metrics['hour'] = {
+            'stream': {'ttft_ms': [], 'total_ms': [], 'out_tokens': [], 'tps': []},
+            'non_stream': {'total_ms': [], 'out_tokens': [], 'tps': []},
+            'count_stream': 0,
+            'count_non_stream': 0,
+            'period_start': now.replace(minute=0, second=0, microsecond=0),
+        }
+    elif scope == 'day':
+        _metrics['day'] = {
+            'stream': {'ttft_ms': [], 'total_ms': [], 'out_tokens': [], 'tps': []},
+            'non_stream': {'total_ms': [], 'out_tokens': [], 'tps': []},
+            'count_stream': 0,
+            'count_non_stream': 0,
+            'period_start': now.replace(hour=0, minute=0, second=0, microsecond=0),
+        }
+
+
+def _flush_and_log(scope: str) -> None:
+    with _metrics_lock:
+        data = _metrics.get(scope, {})
+        if not data:
+            return
+        period_start = data.get('period_start')
+        period_end = datetime.now()
+        # 计算统计
+        s = data['stream']
+        ns = data['non_stream']
+        count_stream = data.get('count_stream', 0)
+        count_non_stream = data.get('count_non_stream', 0)
+        stats = {
+            'stream': {
+                'ttft_ms': _calc_stats([v for v in s['ttft_ms'] if v is not None]),
+                'total_ms': _calc_stats(s['total_ms']),
+                'out_tokens': _calc_stats(s['out_tokens']),
+                'tps': _calc_stats(s['tps']),
+            },
+            'non_stream': {
+                'total_ms': _calc_stats(ns['total_ms']),
+                'out_tokens': _calc_stats(ns['out_tokens']),
+                'tps': _calc_stats(ns['tps']),
+            }
+        }
+        logger.info(
+            "[AGG-%s] period=%s~%s, count_stream=%d, count_non_stream=%d",
+            scope.upper(), period_start, period_end, count_stream, count_non_stream,
+        )
+        def _fmt(d: Dict[str, Optional[float]]) -> str:
+            def f(x):
+                return '-' if x is None else (f"{x:.2f}" if isinstance(x, float) else str(x))
+            return f"min={f(d['min'])}, p50={f(d['p50'])}, p90={f(d['p90'])}, p99={f(d['p99'])}, max={f(d['max'])}"
+        # 分别输出流式与非流式的各项指标
+        logger.info(
+            "[AGG-%s][STREAM] ttft_ms{%s}; total_ms{%s}; out_tokens{%s}; tps{%s}",
+            scope.upper(), _fmt(stats['stream']['ttft_ms']), _fmt(stats['stream']['total_ms']),
+            _fmt(stats['stream']['out_tokens']), _fmt(stats['stream']['tps'])
+        )
+        logger.info(
+            "[AGG-%s][NON_STREAM] total_ms{%s}; out_tokens{%s}; tps{%s}",
+            scope.upper(), _fmt(stats['non_stream']['total_ms']),
+            _fmt(stats['non_stream']['out_tokens']), _fmt(stats['non_stream']['tps'])
+        )
+        _reset_scope(scope)
+
+
+def _record_stream_metrics(ttft_ms: Optional[int], total_ms: int, out_tokens: int, tps: float) -> None:
+    with _metrics_lock:
+        try:
+            _metrics['hour']['count_stream'] += 1
+            _metrics['day']['count_stream'] += 1
+            if ttft_ms is not None:
+                _metrics['hour']['stream']['ttft_ms'].append(float(ttft_ms))
+                _metrics['day']['stream']['ttft_ms'].append(float(ttft_ms))
+            _metrics['hour']['stream']['total_ms'].append(float(total_ms))
+            _metrics['day']['stream']['total_ms'].append(float(total_ms))
+            _metrics['hour']['stream']['out_tokens'].append(float(out_tokens))
+            _metrics['day']['stream']['out_tokens'].append(float(out_tokens))
+            _metrics['hour']['stream']['tps'].append(float(tps))
+            _metrics['day']['stream']['tps'].append(float(tps))
+        except Exception:
+            pass
+
+
+def _record_nonstream_metrics(total_ms: int, out_tokens: int, tps: float) -> None:
+    with _metrics_lock:
+        try:
+            _metrics['hour']['count_non_stream'] += 1
+            _metrics['day']['count_non_stream'] += 1
+            _metrics['hour']['non_stream']['total_ms'].append(float(total_ms))
+            _metrics['day']['non_stream']['total_ms'].append(float(total_ms))
+            _metrics['hour']['non_stream']['out_tokens'].append(float(out_tokens))
+            _metrics['day']['non_stream']['out_tokens'].append(float(out_tokens))
+            _metrics['hour']['non_stream']['tps'].append(float(tps))
+            _metrics['day']['non_stream']['tps'].append(float(tps))
+        except Exception:
+            pass
+
+
+def _scheduler_loop():
+    while True:
+        try:
+            now = datetime.now()
+            next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+            next_midnight = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
+            sleep_seconds = max(0.5, (min(next_hour, next_midnight) - now).total_seconds())
+            time.sleep(sleep_seconds)
+            # 醒来后再次判断两个边界（可能同时触发）
+            now2 = datetime.now()
+            if now2 >= next_hour:
+                _flush_and_log('hour')
+            if now2 >= next_midnight:
+                _flush_and_log('day')
+        except Exception:
+            # 避免线程退出
+            time.sleep(5.0)
+
+
+# 启动后台聚合线程
+_t = threading.Thread(target=_scheduler_loop, name="metrics-aggregator", daemon=True)
+_t.start()
 
 
 class ChatMessage(BaseModel):
@@ -470,6 +666,16 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
                     total_s = max(1e-6, time.perf_counter() - gen_t0)
                     out_tok = _count_tokens(last_content)
                     tps = out_tok / total_s if total_s > 0 else math.nan
+                    # 记录聚合指标（流式）
+                    try:
+                        _record_stream_metrics(
+                            ttft_ms=(int(ttft_s * 1000) if ("ttft_s" in locals() and ttft_s is not None) else None),
+                            total_ms=int(total_s * 1000),
+                            out_tokens=out_tok,
+                            tps=float(tps) if not math.isnan(tps) else 0.0,
+                        )
+                    except Exception:
+                        pass
                     logger.info(
                         "[METRICS] ttft_ms=%s, total_time_ms=%d, output_tokens=%d, throughput_toks_per_s=%.2f",
                         ("%d" % int(ttft_s * 1000) if ttft_s is not None else "-"), int(total_s * 1000), out_tok, tps, 
@@ -605,6 +811,15 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
             total_s = time.perf_counter() - gen_t0
             out_tok = _count_tokens(assistant_text)
             tps = out_tok / total_s if total_s > 0 else math.nan
+            # 记录聚合指标（非流式）
+            try:
+                _record_nonstream_metrics(
+                    total_ms=int(total_s * 1000),
+                    out_tokens=out_tok,
+                    tps=float(tps) if not math.isnan(tps) else 0.0,
+                )
+            except Exception:
+                pass
             logger.info(
                 "[METRICS] total_time_ms=%d, output_tokens=%d, throughput_toks_per_s=%.2f",
                 int(total_s * 1000), out_tok, tps,

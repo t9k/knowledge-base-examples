@@ -371,6 +371,12 @@ def extract_metadata_with_llm(chunk, client):
         print(chunk)
         print(111)
 
+    if len(results["dates"]) > 400:
+        print(222)
+        print(results["dates"])
+        print(222)
+        results["dates"] = "<none>"
+
     if len(results["locations"]) > 200:
         results["locations"] = "<none>"
 

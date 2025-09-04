@@ -132,12 +132,22 @@ def chinese_to_arabic(chinese_str):
 
 
 def chunk_text(text):
-    headers_to_split_on = [
-        ("#", "law"),
-        ("##", "part"),
-        ("###", "chapter"),
-        ("####", "section"),
-    ]
+    # 判断是否存在“编”层级：有则按 law/part/chapter/section；无则按 law/chapter/section
+    has_part_level = re.search(r"## 第[一二三四五六七八九十]编", text) is not None
+
+    if has_part_level:
+        headers_to_split_on = [
+            ("#", "law"),
+            ("##", "part"),
+            ("###", "chapter"),
+            ("####", "section"),
+        ]
+    else:
+        headers_to_split_on = [
+            ("#", "law"),
+            ("##", "chapter"),
+            ("###", "section"),
+        ]
 
     md_splitter = MarkdownHeaderTextSplitter(
         headers_to_split_on=headers_to_split_on, strip_headers=True)
@@ -148,7 +158,7 @@ def chunk_text(text):
     chunks = []
 
     # 正则表达式分隔符
-    pattern = r'(第[零一二三四五六七八九十百千]+条 |[一二三四五六七八九十百千]+、|<!-- INFO END -->)'
+    pattern = r'(第[零一二三四五六七八九十百千]+条 |[一二三四五六七八九十百千]+、|<!-- INFO END -->|<!-- FORCE BREAK -->)'
 
     for md_header_split in md_header_splits:
         text_content = md_header_split.page_content
@@ -183,25 +193,28 @@ def chunk_text(text):
             if chunk_text.startswith("<!-- INFO END -->"):
                 chunk_text = chunk_text[len("<!-- INFO END -->"):].strip()
 
-            # 提取文章编号
+            # 提取法条编号
             article = 0
             article_amended = 0
-            article_match = re.search(r'第([零一二三四五六七八九十百千]+)条 ', chunk_text)
-            if article_match:
-                article = chinese_to_arabic(article_match.group(0))
-
-            # 如果没找到文章编号，尝试查找列表项目符号
-            if article == 0:
+            # 段首“第…条 ”作为当前条文编号
+            leading_article_match = re.match(r'^第([零一二三四五六七八九十百千]+)条\s', chunk_text)
+            if leading_article_match:
+                article = chinese_to_arabic(leading_article_match.group(0))
+            else:
+                # 如果没找到法条编号，尝试查找列表项目符号
                 item_match = re.search(r'([一二三四五六七八九十]+)、', chunk_text)
                 if item_match:
                     article = chinese_to_arabic(item_match.group(0))
-                article_amended_match = re.search(r'第([零一二三四五六七八九十百千]+)条',
-                                                  chunk_text)
-                if article_amended_match:
-                    article_amended = chinese_to_arabic(
-                        article_amended_match.group(0))
+            # 全段扫描其他“第…条”作为被修正/引用的条文，忽略段首自身条号
+            for m in re.finditer(r'第([零一二三四五六七八九十百千]+)条', chunk_text):
+                if leading_article_match and m.start() == 0:
+                    continue
+                candidate = chinese_to_arabic(m.group(0))
+                if candidate != article:
+                    article_amended = candidate
+                    break
 
-            # 创建新的元数据，包含原始元数据和文章编号
+            # 创建新的元数据，包含原始元数据和法条编号
             new_metadata = metadata.copy()
             new_metadata["article"] = article
             new_metadata["article_amended"] = article_amended
@@ -226,8 +239,8 @@ def setup_milvus_collection(dense_dim):
                     dtype=DataType.VARCHAR,
                     is_primary=True,
                     max_length=100),
-        FieldSchema(name="chunk", dtype=DataType.VARCHAR, max_length=8192),
-        FieldSchema(name="law", dtype=DataType.VARCHAR, max_length=100),
+        FieldSchema(name="chunk", dtype=DataType.VARCHAR, max_length=12288),
+        FieldSchema(name="law", dtype=DataType.VARCHAR, max_length=250),
         FieldSchema(name="part", dtype=DataType.VARCHAR, max_length=100),
         FieldSchema(name="chapter", dtype=DataType.VARCHAR, max_length=100),
         FieldSchema(name="section", dtype=DataType.VARCHAR, max_length=100),

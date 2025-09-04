@@ -1,5 +1,6 @@
 import ast
 import json
+import time
 from pydantic import BaseModel
 
 
@@ -18,10 +19,16 @@ class Filter:
         )
         self.round = 0
         self.tool_calls = {}
+        self.start_time = None
+        self.get_first_token_flag = None
+        self.ttft_ms = None
+        self.total_s = None
 
     def inlet(self, body: dict) -> dict:
         n = len(body["messages"])
         self.round = (n + 1) // 2
+        self.start_time = time.perf_counter()
+        self.get_first_token_flag = False
 
         for m in body["messages"]:
             if m["content"].startswith("\n🔍 正在检索"):
@@ -42,13 +49,13 @@ class Filter:
                 body["messages"].insert(2 * i - 1, tool_call_msg)
 
         print(f"Round: {self.round}")
-        print(f"inlet called: {body}")
+        # print(f"inlet called: {body}")
 
         return body
 
     async def stream(self, event: dict, __event_emitter__=None) -> dict:
         # Modify streamed chunks of model output.
-        print(f"stream event: {event}")
+        # print(f"stream event: {event}")
 
         try:
             if event.get("object") == "chat.completion.chunk":
@@ -57,6 +64,11 @@ class Filter:
                     return event
 
                 delta = choices[0].get("delta", {})
+
+                content = delta.get("content")
+                if not self.get_first_token_flag and content:
+                    self.get_first_token_flag = True
+                    self.ttft_ms = int((time.perf_counter() - self.start_time) * 1000)
 
                 tool_call = delta.get("tool_calls")
                 tool_response = delta.get("tool_response")
@@ -78,10 +90,8 @@ class Filter:
                         "arguments": parsed_arguments,
                     }
                     if isinstance(fn, str):
-                        if "criminal_law" in fn:
-                            self.search_category = "刑法"
-                        elif "civil_code" in fn:
-                            self.search_category = "民法典"
+                        if "law" in fn:
+                            self.search_category = "法律"
                         elif "criminal_case" in fn:
                             self.search_category = "刑事案件"
                         elif "civil_case" in fn:
@@ -186,6 +196,10 @@ class Filter:
 
         return event
 
-    # def outlet(self, body: dict) -> None:
-    #     # This is where you manipulate model outputs.
-    #     print(f"outlet called: {body}")
+    def outlet(self, body: dict) -> None:
+        # This is where you manipulate model outputs.
+        # print(f"outlet called: {body}")
+        self.total_s = time.perf_counter() - self.start_time
+        print(
+            f"[METRICS] ttft_ms={self.ttft_ms}, total_time_ms={int(self.total_s*1000)}"
+        )
