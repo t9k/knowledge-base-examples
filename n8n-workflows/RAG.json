@@ -1,0 +1,410 @@
+{
+  "name": "RAG",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Files",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "files",
+              "fieldType": "file",
+              "acceptFileTypes": ".txt, .pdf"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "2fe5a292-084c-4a17-ad6b-34cb1e9545c1",
+      "name": "On form submission",
+      "webhookId": "9943d5bb-8ada-4c9d-893c-0880e7e45d40"
+    },
+    {
+      "parameters": {
+        "model": "=bge-m3",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        120,
+        240
+      ],
+      "id": "5c4bfeeb-0322-4e20-bae8-3bcce4e85f2f",
+      "name": "Embeddings OpenAI",
+      "credentials": {
+        "openAiApi": {
+          "id": "oS1V20UZalm6Nusf",
+          "name": "bge-m3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "binary",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1,
+      "position": [
+        360,
+        220
+      ],
+      "id": "dc79ced6-c514-4d96-8a30-6e0037b0e823",
+      "name": "Default Data Loader"
+    },
+    {
+      "parameters": {
+        "separator": "=\\n\\n",
+        "chunkSize": 512,
+        "chunkOverlap": 64
+      },
+      "type": "@n8n/n8n-nodes-langchain.textSplitterCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        500,
+        440
+      ],
+      "id": "7150a807-ded6-492b-b54f-753a42fdf7c5",
+      "name": "Character Text Splitter"
+    },
+    {
+      "parameters": {
+        "mode": "insert"
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        0
+      ],
+      "id": "d0b0f3fb-ff08-43ca-9b27-5a87dc3027cb",
+      "name": "Simple Vector Store"
+    },
+    {
+      "parameters": {
+        "chunkSize": 256,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        660,
+        440
+      ],
+      "id": "ebe9078e-fe9a-4a92-bbe9-2ff64af615a6",
+      "name": "Recursive Character Text Splitter"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "You are a helpful assistant. You can access to a vector database."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [
+        500,
+        740
+      ],
+      "id": "e40d897d-38fb-4ccb-be09-e5b2fadde243",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        380,
+        980
+      ],
+      "id": "2537e535-e421-4878-8b0e-dca8b7bac53c",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "aG0LFY8eJuQTF3x9",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        520,
+        980
+      ],
+      "id": "231df9a0-4077-4652-9458-4de191257dce",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1040,
+        1120
+      ],
+      "id": "5c52c300-757e-4756-8150-eaab942007e7",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "aG0LFY8eJuQTF3x9",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "wikipedia"
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [
+        760,
+        940
+      ],
+      "id": "27fe6980-d008-498a-b2ba-64c0c08cad3e",
+      "name": "Answer questions with a vector store"
+    },
+    {
+      "parameters": {
+        "model": "=bge-m3",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        600,
+        1360
+      ],
+      "id": "da8e01ea-c5a5-480f-b162-cccdfc56131f",
+      "name": "Embeddings OpenAI1",
+      "credentials": {
+        "openAiApi": {
+          "id": "oS1V20UZalm6Nusf",
+          "name": "bge-m3"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        1120
+      ],
+      "id": "54f6875d-3981-4c4c-9853-c70bd7a7cbf0",
+      "name": "Simple Vector Store1"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.textSplitterTokenSplitter",
+      "typeVersion": 1,
+      "position": [
+        340,
+        440
+      ],
+      "id": "e66a11fc-4dc7-4eff-b102-865726b78aac",
+      "name": "Token Splitter"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "Qwen2.5-7B-Instruct",
+          "mode": "list",
+          "cachedResultName": "Qwen2.5-7B-Instruct"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        980
+      ],
+      "id": "e42ee617-da44-431d-9080-73736dd67ca9",
+      "name": "OpenAI Chat Model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "QaByvmqjMpcVtHsV",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# 问题\n\n1. Character Text Splitter 的 \\n 符没用，功能少\n2. RAG 使用 vllm 的 LLM 报错 400\n3. 接入 Milvus 失败，字段/类型对不上",
+        "height": 840,
+        "width": 420
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        380
+      ],
+      "id": "8f921a0a-781c-448a-9828-fc740e0200d4",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Simple Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Simple Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Simple Vector Store",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Character Text Splitter": {
+      "ai_textSplitter": [
+        []
+      ]
+    },
+    "Recursive Character Text Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Default Data Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Answer questions with a vector store",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer questions with a vector store": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Simple Vector Store1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Vector Store1": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "Answer questions with a vector store",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c6c42773-efa7-44a4-9982-14889482f627",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f676facbf993dc655d4ff595f412b8dbee27fa0bba988c978fb13709e34dd53f"
+  },
+  "id": "9R8SVdSISFVcMZbF",
+  "tags": []
+}

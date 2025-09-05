@@ -13,9 +13,9 @@ class Filter:
         # Initialize valves (optional configuration for the Filter)
         self.valves = self.Valves()
         self.user_prompt_prefix = (
-            "提示：法小助必须精准识别用户的真实意图；需要调用检索工具进行查询，除非答案已经在上下文中；"
-            "如果用户没有提及法条编号，不得使用法条编号来查询或检索；"
-            "如果检索结果为空，应移除过滤表达式，重新调用检索工具。\n\n"
+            "提示：法小助必须精准识别用户的真实意图；"
+            "根据用户的问题和上下文中已有的信息判断，是否需要调用检索工具，调用哪些检索工具；"
+            "如果用户没有提及法条编号，不得使用法条编号来查询或检索。\n\n"
         )
         self.round = 0
         self.tool_calls = {}
