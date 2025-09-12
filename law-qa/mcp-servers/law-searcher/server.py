@@ -20,8 +20,8 @@ from pymilvus import (
 )
 from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 from openai import OpenAI
-import torch
-import torch_gcu
+from importlib import import_module
+from importlib import util as importlib_util
 
 logger = logging.getLogger("FastMCP.__main__")
 logger.setLevel(logging.INFO)
@@ -300,11 +300,11 @@ def format_grouped_sources(results: list[dict]) -> str:
         block_str = json.dumps(block, ensure_ascii=False, indent=4)
         output_parts.append(f'<source id="{i}">\n{block_str}\n</source>')
 
-    prompt = """请根据上面的检索结果回答用户的问题，并在需要时加入行内引用，引用格式为 [n]，对应 <source id="n"> 标签。
+    prompt = """如需在回答中引用检索结果，请使用行内引用格式 [n]，对应 <source id="n"></source>。
 
-注意一个 <source id="n"></source> 块内可能有多篇 document，引用其中任意一篇的格式都是 [n]。
+注意：同一个 <source id="n"></source> 内可能包含多篇 document，引用任意一篇时都统一写作 [n]。
 
-行内引用示例：“根据研究，该方法可以提高 20% 的效率 [1]。”"""
+行内引用示例：“根据研究，该方法可提升 20% 的效率 [1]。”"""
     return "\n".join(output_parts) + "\n" + prompt
 
 
@@ -819,7 +819,37 @@ if __name__ == "__main__":
         "embedding_model": os.environ.get("EMBEDDING_MODEL"),
     }
 
-    ef = BGEM3EmbeddingFunction(use_fp16=False, device="gcu")
+    # 设备选择顺序：CUDA(GPU) -> GCU(Enflame) -> CPU
+    device = "cpu"
+    # 优先检测 NVIDIA CUDA GPU（动态导入以避免静态分析告警）
+    try:
+        if importlib_util.find_spec("torch") is None:
+            raise Exception("torch not installed")
+        _torch = import_module("torch")
+        if hasattr(_torch, "cuda") and _torch.cuda.is_available():
+            device = "cuda"
+            logger.info("Detected NVIDIA CUDA GPU, using device 'cuda'")
+        else:
+            raise Exception("CUDA not available")
+    except Exception as e:
+        logger.info("CUDA not available: %s", e)
+        # 检测 Enflame GCU：要求 torch 与 torch_gcu 均可导入
+        try:
+            if importlib_util.find_spec("torch") is None:
+                raise Exception("torch not installed")
+            # 使用字符串拼接以避免静态分析对未安装模块的告警
+            _gcu_mod_name = "torch" + "_gcu"
+            if importlib_util.find_spec(_gcu_mod_name) is None:
+                raise Exception("torch_gcu not installed")
+            import_module("torch")
+            import_module(_gcu_mod_name)
+            device = "gcu"
+            logger.info("Detected Enflame GCU, using device 'gcu'")
+        except Exception as eg:
+            logger.info("GCU not available: %s, falling back to CPU", eg)
+            device = "cpu"
+
+    ef = BGEM3EmbeddingFunction(use_fp16=False, device=device)
 
     if args.sse:
         if enable_auth:

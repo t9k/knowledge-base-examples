@@ -1,25 +1,25 @@
 server:
   image:
-    registry: "registry.qy.t9kcloud.cn"
-    repository: "topsrider/vllm-openai"
-    tag: "20250516"
+    registry: "registry.cn-hangzhou.aliyuncs.com"
+    repository: "t9k/vllm-openai"
+    tag: "v0.10.1"
     pullPolicy: Always
 
   resources:
     limits:
-      cpu: 4
-      memory: 64Gi
-      enflame.com/gcu: 2
+      cpu: 1
+      memory: 16Gi
+      nvidia.com/gpu: 1
 
   model:
-    deployName: "Qwen3-32B"
+    deployName: "Qwen3-Embedding-0.6B"
     volume:
       storageClass: ""
       size: 32Gi
       accessModes:
         - ReadWriteOnce
-      existingClaim: "llm"
-      subPath: "Qwen3-32B"
+      existingClaim: "law-qa"
+      subPath: "Qwen3-Embedding-0.6B"
 
   autoScaling:
     minReplicas: 1
@@ -29,10 +29,10 @@ server:
   app:
     extraArgs:
       - "--gpu-memory-utilization=0.95"
-      - "--tensor-parallel-size=2"
-      - "--max-model-len=8192"
 
-  env: []
+  env:
+    - name: "VLLM_USE_V1"
+      value: "0"
   extraVolumeMounts: []
   extraVolume: []
   securityContext: {}

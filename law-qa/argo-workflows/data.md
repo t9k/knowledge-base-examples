@@ -1,7 +1,5 @@
 # 数据
 
-本目录包含法律数据的处理脚本和相关文档。项目使用的数据主要分为案例数据和法律法规数据两大类。
-
 ## 数据概况
 
 ### 刑事案例
@@ -25,7 +23,7 @@
     - `imprisonment`：刑期（单位：月）
     - `life_imprisonment`：是否无期徒刑
 
-解压后的数据文件放置在 <https://modelsphere.nc201.t9kcloud.cn/datasets/xyx/CAIL2018>。
+解压后的数据文件放置在 <https://modelscope.cn/datasets/qazwsxplkj/CAIL2018> / <https://modelsphere.qy.t9kcloud.cn/datasets/t9k-ai/CAIL2018>。
 
 **数据规模**
 
@@ -46,11 +44,9 @@
 https://wenshu.court.gov.cn/website/wenshu/181107ANFZ0BXSK4/index.html?docId=18e4dbdb13524e3b93afadb600a15151,（2021）黑7530执472号,赵文君、李建国等买卖合同纠纷首次执行执行通知书,黑龙江省诺敏河人民法院,黑龙江省,执行案件,2,www.macrodatas.cn,执行实施,2021-10-02,2021-10-03,赵文君；李建国；安亚君,买卖合同纠纷,,文书内容黑龙江省诺敏河人民法院结 案 通 知 书（2021）黑7530执472号李**、安亚君：关于你二人申请执行程希江、赵文君买卖合同纠纷一案，本案已执行完毕。根据最高人民法院《关于执行案件立案、结案问题的意见》第十五条之规定，本案做结案处理。特此通知。二〇二一年十月二日 微信公众号“马克 数据网”
 ```
 
-原始数据文件放置在 <https://modelsphere.nc201.t9kcloud.cn/datasets/xyx/judgment-documents/files/main/raw>。
-
 **数据预处理**：
 
-对于解压得到的 csv 文件，在同一目录下创建预处理脚本 [`preprocess_judgment_docs.py`](./preprocess_judgment_docs.py) 并执行：
+对于解压得到的 csv 文件，在同一目录下执行预处理脚本 [`preprocess.py`](./preprocess_judgment_docs.py)：
 
 ```bash
 python preprocess_judgment_docs.py
@@ -66,7 +62,7 @@ python preprocess_judgment_docs.py
 6. 将HTML实体编码替换为对应字符
 7. 移除"全文"中的换行符
 
-预处理后的数据文件放置在 <https://modelsphere.qy.t9kcloud.cn/datasets/t9k-ai/cn-judgment-docs-demo/files/main>。
+预处理后的数据文件放置在 <https://modelscope.cn/datasets/qazwsxplkj/cn-judgment-docs> / <https://modelsphere.qy.t9kcloud.cn/datasets/t9k-ai/cn-judgment-docs>。
 
 **数据规模**
 
@@ -78,7 +74,7 @@ python preprocess_judgment_docs.py
 
 ### 法律法规
 
-参见 [t9k-ai/cn-laws](https://modelsphere.qy.t9kcloud.cn/datasets/t9k-ai/cn-laws) 数据集的介绍。
+数据文件放置在 <https://modelscope.cn/datasets/qazwsxplkj/cn-laws> / <https://modelsphere.qy.t9kcloud.cn/datasets/t9k-ai/cn-laws>。请前往查看包含哪些法律法规，以及数据预处理的过程。
 
 **数据规模**
 
@@ -101,10 +97,10 @@ python preprocess_judgment_docs.py
 1. 递归处理指定目录下的所有 json 文件
 2. 逐行读取 json 文件，解析为 dict 实例，其中包含已有的元数据 relevant_articles、accusation、punish_of_money 等
 3. 若启用父子分段：使用 RecursiveCharacterTextSplitter 基于 seperator 和 chunk size 对 fact 进行 chunking 得到 parent chunk，继续使用 RecursiveCharacterTextSplitter 对 parent chunk 进行 chunking 得到 (child) chunk
-4. 若不启用分子分段：使用 RecursiveCharacterTextSplitter 基于 seperator 和 chunk size 对 fact 进行 chunking 得到 chunk
-5. 对于每个 fact、parent chunk 和 chunk，生成一个 uuid 作为唯一标识符
-6. 对于每个 chunk，qwen3-embedding-0.6b 模型生成密集向量，bge-m3 模型生成稀疏向量，另外调用 qwen3-32b 模型提取额外的元数据
-7. 将 chunk 批次插入到 Milvus Collection 中
+    若不启用分子分段：使用 RecursiveCharacterTextSplitter 基于 seperator 和 chunk size 对 fact 进行 chunking 得到 chunk
+4. 对于每个 fact、parent chunk 和 chunk，生成一个 uuid 作为唯一标识符
+5. 对于每个 chunk，qwen3-embedding-0.6b 模型生成密集向量，bge-m3 模型生成稀疏向量，另外可选地调用 qwen3-32b 模型提取额外的元数据
+6. 将 chunk 批次插入到 Milvus Collection 中
 
 chunking、embedding 及 Milvus Collection 配置信息如下：
 
@@ -169,22 +165,22 @@ chunking、embedding 及 Milvus Collection 配置信息如下：
 1. 处理指定目录下的所有 csv 文件
 2. 流式读取 csv 文件，解析为 dict 实例，其中包含已有的元数据 case_number、case_name、court 等
 3. 若启用父子分段：使用 RecursiveCharacterTextSplitter 基于 seperator 和 chunk size 对 fact 进行 chunking 得到 parent chunk，继续使用 RecursiveCharacterTextSplitter 对 parent chunk 进行 chunking 得到 (child) chunk
-4. 若不启用分子分段：使用 RecursiveCharacterTextSplitter 基于 seperator 和 chunk size 对 fact 进行 chunking 得到 chunk
-5. 对于每个 fact、parent chunk 和 chunk，生成一个 uuid 作为唯一标识符
-6. 对于每个 chunk，qwen3-embedding-0.6b 模型生成密集向量，bge-m3 模型生成稀疏向量，另外调用 qwen3-32b 模型提取额外的元数据
-7. 将 chunk 批次插入到 Milvus Collection 中
+    若不启用分子分段：使用 RecursiveCharacterTextSplitter 基于 seperator 和 chunk size 对 fact 进行 chunking 得到 chunk
+4. 对于每个 fact、parent chunk 和 chunk，生成一个 uuid 作为唯一标识符
+5. 对于每个 chunk，qwen3-embedding-0.6b 模型生成密集向量，bge-m3 模型生成稀疏向量，另外可选地调用 qwen3-32b 模型提取额外的元数据
+6. 将 chunk 批次插入到 Milvus Collection 中
 
 chunking、embedding 及 Milvus Collection 配置信息如下：
 
 **chunking**
 
 - child：langchain_text_splitters.RecursiveCharacterTextSplitter
-  - seperator：["\r\n", "\n", "。", "；", "，", "、"]
+  - seperator：["\r\n", "\n", "。", "；", "，", "、", "：", "（", "）"]
   - keep_separator：end
   - chunk size：256
   - overlap：32
 - parent (optional)：langchain_text_splitters.RecursiveCharacterTextSplitter
-  - seperator：["\r\n", "\n", "。", "；", "，", "、"]
+  - seperator：["\r\n", "\n", "。", "；", "，", "、", "：", "（", "）"]
   - keep_separator：end
   - chunk size：4096
   - overlap：0
@@ -237,9 +233,9 @@ chunking、embedding 及 Milvus Collection 配置信息如下：
 **主要步骤**：
 
 1. 递归处理指定目录下的所有 md 文件
-2. 读取整个 md 文件（最大的单一文件为刑法.md，大小 212KB），进行两层 chunking：
-   - 使用 MarkdownHeaderTextSplitter 基于 md 标题进行 chunking，标题不会被保留在 chunk 中，但会被抽取为元数据：一、二、三、四级标题分别作为元数据 law、part、chapter 和 section。没有标题则相应的元数据的值为空字符串。
-   - 手动实现 chunking，使用模式 r'(第[零一二三四五六七八九十百千]+条 |[一二三四五六七八九十百千]+、|<!-- INFO END -->)'，分别匹配法条，刑法修正案的法条，法律通过信息与正文的分隔符。匹配前两者（法条）时，保留匹配对象，并把匹配对象中的中文数字转换为数字，作为元数据 article 的值；匹配后者（分隔符）时，不保留匹配对象。
+2. 读取整个 md 文件，进行两层 chunking：
+   - 使用 MarkdownHeaderTextSplitter 基于 md 标题进行 chunking，标题不会被保留在 chunk 中，但会被抽取为元数据：一、二、三、四级标题分别作为元数据 law、part、chapter 和 section，或者一、二、三级标题分别作为元数据 law、chapter 和 section。没有标题则相应的元数据的值为空字符串。
+   - 手动实现 chunking，使用模式 `r'(第[零一二三四五六七八九十百千]+条 |[一二三四五六七八九十百千]+、|<!-- INFO END -->|<!-- FORCE BREAK -->)'`，分别匹配法条和特殊分隔符。匹配法条时，保留匹配对象，并把匹配对象中的中文数字转换为数字，作为元数据 article 的值；匹配分隔符时，不保留匹配对象。
    - 最终每个 chunk 是一个法条（或法律通过信息），具有元数据 law、part、chapter、section 和 article。
 3. 对于每个 chunk，生成一个 uuid 作为唯一标识符，bge-m3 嵌入模型生成密集向量和稀疏向量
 4. 将 chunk 批次插入到 Milvus Collection 中
@@ -249,10 +245,12 @@ chunking、embedding 及 Milvus Collection 配置信息如下：
 **chunking**
 
 - langchain_text_splitters.MarkdownHeaderTextSplitter
-  - headers_to_split_on：[("#", "Law"), ("##", "Part"), ("###", "Chapter"), ("####", "Section")]
+  - headers_to_split_on：
+    - [("#", "Law"), ("##", "Part"), ("###", "Chapter"), ("####", "Section")]
+    - [("#", "Law"), ("##", "Chapter"), ("###", "Section")]
   - strip_headers：True
 - 手动实现 chunking 到一个一个法条：
-  - separator：r'(第[零一二三四五六七八九十百]+条 |[一二三四五六七八九十]+、)'
+  - separator：r'(第[零一二三四五六七八九十百千]+条 |[一二三四五六七八九十百千]+、|<!-- INFO END -->|<!-- FORCE BREAK -->)'
   - keep_separator：start
 
 **embedding**
@@ -262,12 +260,10 @@ chunking、embedding 及 Milvus Collection 配置信息如下：
 - dense：qwen3-embedding-0.6b
   - vLLM 在线推理
 
-
 **indexing**
 
 - sparse indexing：SPARSE_INVERTED_INDEX，IP
 - dense indexing：HNSW (M=24, efConstruction=400)，COSINE
-
 
 **Collection fields**
 

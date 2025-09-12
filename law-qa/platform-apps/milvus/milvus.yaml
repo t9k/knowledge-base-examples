@@ -15,14 +15,14 @@ extraConfigFiles:
         superUsers: root
 
 queryNode:
-  replicas: 4
+  replicas: 6
   resources:
     limits:
       cpu: 4
       memory: 16Gi
 
 indexNode:
-  replicas: 2
+  replicas: 4
   resources:
     limits:
       cpu: 4

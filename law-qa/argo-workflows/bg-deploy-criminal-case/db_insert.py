@@ -22,6 +22,8 @@ from pymilvus import (
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from importlib import import_module
+from importlib import util as importlib_util
 
 # Set up logging
 # Check if LOG_FILE environment variable is set
@@ -225,7 +227,7 @@ def extract_metadata_with_llm(chunk, client):
                     ],
                     extra_body={
                         "chat_template_kwargs": {
-                            "enable_thinking": True
+                            "enable_thinking": False
                         },
                     },
                     temperature=0.0)
@@ -609,9 +611,37 @@ def main():
 
     llm_client = OpenAI(base_url=CHAT_BASE_URL, api_key="dummy", timeout=60)
 
-    import torch
-    import torch_gcu
-    ef = BGEM3EmbeddingFunction(use_fp16=False, device="gcu")
+    # 设备选择顺序：CUDA(GPU) -> GCU(Enflame) -> CPU
+    device = "cpu"
+    # 优先检测 NVIDIA CUDA GPU（动态导入以避免静态分析告警）
+    try:
+        if importlib_util.find_spec("torch") is None:
+            raise Exception("torch not installed")
+        _torch = import_module("torch")
+        if hasattr(_torch, "cuda") and _torch.cuda.is_available():
+            device = "cuda"
+            logger.info("Detected NVIDIA CUDA GPU, using device 'cuda'")
+        else:
+            raise Exception("CUDA not available")
+    except Exception as e:
+        logger.info("CUDA not available: %s", e)
+        # 检测 Enflame GCU：要求 torch 与 torch_gcu 均可导入
+        try:
+            if importlib_util.find_spec("torch") is None:
+                raise Exception("torch not installed")
+            # 使用字符串拼接以避免静态分析对未安装模块的告警
+            _gcu_mod_name = "torch" + "_gcu"
+            if importlib_util.find_spec(_gcu_mod_name) is None:
+                raise Exception("torch_gcu not installed")
+            import_module("torch")
+            import_module(_gcu_mod_name)
+            device = "gcu"
+            logger.info("Detected Enflame GCU, using device 'gcu'")
+        except Exception as eg:
+            logger.info("GCU not available: %s, falling back to CPU", eg)
+            device = "cpu"
+
+    ef = BGEM3EmbeddingFunction(use_fp16=False, device=device)
     dense_dim = ef.dim["dense"]
     col, parent_col = setup_milvus_collection(dense_dim)
 

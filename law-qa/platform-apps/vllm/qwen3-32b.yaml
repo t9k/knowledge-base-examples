@@ -1,25 +1,25 @@
 server:
   image:
-    registry: "registry.qy.t9kcloud.cn"
-    repository: "topsrider/vllm-openai"
-    tag: "20250516"
+    registry: "registry.cn-hangzhou.aliyuncs.com"
+    repository: "t9k/vllm-openai"
+    tag: "v0.10.1"
     pullPolicy: Always
 
   resources:
     limits:
       cpu: 4
       memory: 64Gi
-      enflame.com/gcu: 1
+      nvidia.com/gpu: 2
 
   model:
-    deployName: "bge-reranker-v2-m3"
+    deployName: "Qwen3-32B"
     volume:
       storageClass: ""
       size: 32Gi
       accessModes:
         - ReadWriteOnce
-      existingClaim: "llm"
-      subPath: "bge-reranker-v2-m3"
+      existingClaim: "law-qa"
+      subPath: "Qwen3-32B"
 
   autoScaling:
     minReplicas: 1
@@ -28,8 +28,11 @@ server:
 
   app:
     extraArgs:
-      - "--task=score"
       - "--gpu-memory-utilization=0.95"
+      - "--tensor-parallel-size=2"
+      - "--max-model-len=40000"
+      - "--reasoning-parser=qwen3"
+      - "--enable-log-requests"
 
   env: []
   extraVolumeMounts: []

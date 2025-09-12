@@ -21,6 +21,8 @@ from pymilvus import (
 from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter
 from openai import OpenAI
+from importlib import import_module
+from importlib import util as importlib_util
 
 # Set up logging
 # Check if LOG_FILE environment variable is set
@@ -46,7 +48,6 @@ DATABASE_NAME = os.environ.get("DATABASE_NAME")
 COLLECTION_NAME = os.environ.get("COLLECTION_NAME")
 EMBEDDING_BASE_URL = os.environ.get("EMBEDDING_BASE_URL")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL")
-FILE_PATH = os.environ.get("FILE_PATH")
 
 # Log environment variables
 logger.info("=== insert_data_cases.py environment ===")
@@ -55,7 +56,6 @@ logger.info(f"DATABASE_NAME: {DATABASE_NAME}")
 logger.info(f"COLLECTION_NAME: {COLLECTION_NAME}")
 logger.info(f"EMBEDDING_BASE_URL: {EMBEDDING_BASE_URL}")
 logger.info(f"EMBEDDING_MODEL: {EMBEDDING_MODEL}")
-logger.info(f"FILE_PATH: {FILE_PATH}")
 logger.info(f"LOG_FILE: {log_file}")
 
 BATCH_SIZE = 1000
@@ -334,7 +334,7 @@ def insert_data_streaming(col, record_iter, ef, batch_size=BATCH_SIZE):
 
 
 def main():
-    path = "/workspace/law/" + FILE_PATH.strip("/")
+    path = "/workspace/law/"
 
     md_files = []
 
@@ -358,10 +358,37 @@ def main():
         print(f"Path not found: {path}")
         return
 
-    import torch
-    import torch_gcu
-    ef = BGEM3EmbeddingFunction(use_fp16=False, device="gcu")
-    print("Using Enflame GCU for embedding")
+    # 设备选择顺序：CUDA(GPU) -> GCU(Enflame) -> CPU
+    device = "cpu"
+    # 优先检测 NVIDIA CUDA GPU（动态导入以避免静态分析告警）
+    try:
+        if importlib_util.find_spec("torch") is None:
+            raise Exception("torch not installed")
+        _torch = import_module("torch")
+        if hasattr(_torch, "cuda") and _torch.cuda.is_available():
+            device = "cuda"
+            logger.info("Detected NVIDIA CUDA GPU, using device 'cuda'")
+        else:
+            raise Exception("CUDA not available")
+    except Exception as e:
+        logger.info("CUDA not available: %s", e)
+        # 检测 Enflame GCU：要求 torch 与 torch_gcu 均可导入
+        try:
+            if importlib_util.find_spec("torch") is None:
+                raise Exception("torch not installed")
+            # 使用字符串拼接以避免静态分析对未安装模块的告警
+            _gcu_mod_name = "torch" + "_gcu"
+            if importlib_util.find_spec(_gcu_mod_name) is None:
+                raise Exception("torch_gcu not installed")
+            import_module("torch")
+            import_module(_gcu_mod_name)
+            device = "gcu"
+            logger.info("Detected Enflame GCU, using device 'gcu'")
+        except Exception as eg:
+            logger.info("GCU not available: %s, falling back to CPU", eg)
+            device = "cpu"
+
+    ef = BGEM3EmbeddingFunction(use_fp16=False, device=device)
     dense_dim = ef.dim["dense"]
     col = setup_milvus_collection(dense_dim)
 

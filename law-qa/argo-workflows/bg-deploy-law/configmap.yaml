@@ -6,5 +6,6 @@ data:
   env.properties: |
     MILVUS_URI="http://app-milvus-xxxxxxxx.namespace.svc.cluster.local:19530"
     MILVUS_TOKEN="root:Milvus"
+    COLLECTION_NAME="cn_law"
     EMBEDDING_BASE_URL="http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
     EMBEDDING_MODEL="Qwen3-Embedding-0.6B"

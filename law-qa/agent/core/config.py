@@ -33,7 +33,7 @@ class AgentConfig:
     # API server
     api_host: str = os.getenv('AGENT_API_HOST', '0.0.0.0')
     api_port: int = int(os.getenv('AGENT_API_PORT', '8001'))
-    api_auth_key: Optional[str] = os.getenv('AGENT_API_KEY')
+    api_auth_key: Optional[str] = os.getenv('CHAT_API_KEY')
     allow_cors: bool = True
 
     # WebUI
@@ -46,10 +46,10 @@ def build_config_from_args() -> AgentConfig:
     parser.add_argument('--mode', type=str, choices=['cli', 'webui', 'api'], default=None)
 
     # LLM
-    parser.add_argument('--model', type=str, default=os.getenv('AGENT_MODEL', 'Qwen3-32B'))
-    parser.add_argument('--model-server', type=str, default=os.getenv('AGENT_MODEL_SERVER', 'http://127.0.0.1:8000/v1'))
-    parser.add_argument('--temperature', type=float, default=float(os.getenv('AGENT_TEMPERATURE', '0.0')))
-    parser.add_argument('--top-p', type=float, default=float(os.getenv('AGENT_TOP_P', '0.95')))
+    parser.add_argument('--model', type=str, default=os.getenv('CHAT_MODEL', 'Qwen3-32B'))
+    parser.add_argument('--model-server', type=str, default=os.getenv('CHAT_BASE_URL', 'http://127.0.0.1:8000/v1'))
+    parser.add_argument('--temperature', type=float, default=float(os.getenv('CHAT_TEMPERATURE', '0.0')))
+    parser.add_argument('--top-p', type=float, default=float(os.getenv('CHAT_TOP_P', '0.95')))
 
     # thinking switch
     group = parser.add_mutually_exclusive_group()
@@ -57,11 +57,11 @@ def build_config_from_args() -> AgentConfig:
     group.add_argument('--disable-thinking', dest='enable_thinking', action='store_false', help='Disable thinking mode')
     parser.set_defaults(enable_thinking=True)
     
-    parser.add_argument('--thinking-budget', type=int, default=int(os.getenv('AGENT_THINKING_BUDGET', '8192')))
+    parser.add_argument('--thinking-budget', type=int, default=int(os.getenv('CHAT_THINKING_BUDGET', '8192')))
 
     # Tokenizer & history
-    parser.add_argument('--tokenizer-path', type=str, default=os.getenv('AGENT_TOKENIZER_PATH', 'Qwen/Qwen3-32B'))
-    parser.add_argument('--max-tokens', type=int, default=int(os.getenv('AGENT_MAX_TOKENS', '10000')))
+    parser.add_argument('--tokenizer-path', type=str, default=os.getenv('CHAT_TOKENIZER_PATH', 'Qwen/Qwen3-32B'))
+    parser.add_argument('--max-tokens', type=int, default=int(os.getenv('CHAT_MAX_TOKENS', '10000')))
 
     # MCP
     parser.add_argument('--law-searcher', action='store_true')

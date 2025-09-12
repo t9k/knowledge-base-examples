@@ -21,15 +21,12 @@
 #### HTTP 模式 (streamable-http)
 - **特点**: 传统的 HTTP 请求/响应模式
 - **适用场景**: 标准的 MCP 客户端集成
-- **路径**: `/mcp/law-searcher/`
+- **端点**: `/mcp/law-searcher/mcp/`
 
 #### SSE 模式 (Server-Sent Events)
 - **特点**: 实时双向流式通信
 - **适用场景**: 需要实时交互的应用
-- **路径**: `/mcp/law-searcher-sse/`
-- **端点**: 
-  - SSE 连接：`/mcp/law-searcher-sse/sse`
-  - 消息发送：`/mcp/law-searcher-sse/message`
+- **端点**: `/mcp/law-searcher/sse`
 
 ### 身份认证
 
@@ -44,20 +41,10 @@
 
 ### 在 Kubernetes 部署
 
-服务提供两种部署模式：
-
-#### HTTP 模式部署
 修改 `k8s.yaml` 中的 ConfigMap 和 VirtualService 配置，然后执行以下命令进行部署：
 
 ```bash
 kubectl apply -f k8s.yaml
-```
-
-#### SSE 模式部署
-修改 `k8s-sse.yaml` 中的 ConfigMap 和 VirtualService 配置，然后执行以下命令进行部署：
-
-```bash
-kubectl apply -f k8s-sse.yaml
 ```
 
 ### 在本地部署
@@ -65,7 +52,7 @@ kubectl apply -f k8s-sse.yaml
 1. 安装依赖：
 
 ```bash
-pip install pymilvus[model]==2.5.10 fastmcp==2.8.1 python-dotenv uvicorn
+pip install -r requirements.txt
 ```
 
 2. 创建 `.env` 文件：
@@ -74,8 +61,7 @@ pip install pymilvus[model]==2.5.10 fastmcp==2.8.1 python-dotenv uvicorn
 MILVUS_URI=http://localhost:19530
 MILVUS_TOKEN=your_token
 MILVUS_DB=default
-MILVUS_COLLECTION_CRIMINAL_LAW=criminal_law
-MILVUS_COLLECTION_CIVIL_CODE=civil_code
+MILVUS_COLLECTION=criminal_law  # 或者设置为 civil_code，根据部署选择其中一个
 EMBEDDING_BASE_URL=http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1
 EMBEDDING_MODEL=Qwen3-Embedding-0.6B
 ENABLE_AUTH=false

@@ -1,4 +1,4 @@
-FROM registry.qy.t9kcloud.cn/topsrider/jupyterlab-torch-2.3.0:20241224
+FROM pytorch/pytorch:2.8.0-cuda12.6-cudnn9-runtime
 
 ENV HF_ENDPOINT=https://hf-mirror.com
 

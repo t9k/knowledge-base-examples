@@ -19,8 +19,10 @@ spec:
     spec:
       containers:
       - name: mcp-server-reranker
-        image: registry.qy.t9kcloud.cn/topsrider/mcp-server:reranker-20250716
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/mcp-server:reranker-20250912
+        # image: registry.qy.t9kcloud.cn/topsrider/mcp-server:reranker-20250716
         imagePullPolicy: Always
+        # args: ["--sse"]
         ports:
         - containerPort: 8000
           name: http
@@ -47,11 +49,9 @@ spec:
           requests:
             memory: 4Gi
             cpu: 2
-            enflame.com/gcu: "1"
           limits:
             memory: 8Gi
             cpu: 4
-            enflame.com/gcu: "1"
         securityContext:
           allowPrivilegeEscalation: false
           runAsNonRoot: true
@@ -116,5 +116,6 @@ metadata:
   name: mcp-server-reranker-config
 data:
   RERANKER_BASE_URL: "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn"
-  RERANKER_MODEL: "bge-reranker-v2-m3"
+  RERANKER_MODEL: "Qwen3-Reranker-4B"
+  # RERANKER_MODEL: "bge-reranker-v2-m3"
   ENABLE_AUTH: "false"

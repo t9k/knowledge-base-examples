@@ -1,4 +1,4 @@
-FROM registry.qy.t9kcloud.cn/topsrider/jupyterlab-torch-2.3.0:20241224
+FROM python:3.12-slim
 
 WORKDIR /app
 COPY . .

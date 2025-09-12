@@ -22,15 +22,12 @@
 #### HTTP 模式 (streamable-http)
 - **特点**: 传统的 HTTP 请求/响应模式
 - **适用场景**: 标准的 MCP 客户端集成
-- **路径**: `/mcp/case-searcher/`
+- **端点**: `/mcp/case-searcher/mcp/`
 
 #### SSE 模式 (Server-Sent Events)
 - **特点**: 实时双向流式通信
 - **适用场景**: 需要实时交互的应用
-- **路径**: `/mcp/case-searcher-sse/`
-- **端点**: 
-  - SSE 连接：`/mcp/case-searcher-sse/sse`
-  - 消息发送：`/mcp/case-searcher-sse/message`
+- **端点**: `/mcp/case-searcher/sse`
 
 ### 身份认证
 
@@ -45,20 +42,10 @@
 
 ### 在 Kubernetes 部署
 
-服务提供两种部署模式：
-
-#### HTTP 模式部署
 修改 `k8s.yaml` 中的 ConfigMap 和 VirtualService 配置，然后执行以下命令进行部署：
 
 ```bash
 kubectl apply -f k8s.yaml
-```
-
-#### SSE 模式部署
-修改 `k8s-sse.yaml` 中的 ConfigMap 和 VirtualService 配置，然后执行以下命令进行部署：
-
-```bash
-kubectl apply -f k8s-sse.yaml
 ```
 
 ### 在本地部署
@@ -66,7 +53,7 @@ kubectl apply -f k8s-sse.yaml
 1. 安装依赖：
 
 ```bash
-pip install pymilvus[model]==2.5.10 fastmcp==2.8.1 python-dotenv uvicorn
+pip install -r requirements.txt
 ```
 
 2. 创建 `.env` 文件：
@@ -79,7 +66,7 @@ MILVUS_COLLECTION_CRIMINAL_CASE=criminal_case
 MILVUS_COLLECTION_CRIMINAL_CASE_PARENT=criminal_case_parent
 MILVUS_COLLECTION_CIVIL_CASE=civil_case
 MILVUS_COLLECTION_CIVIL_CASE_PARENT=civil_case_parent
-EMBEDDING_BASE_URL=http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1
+EMBEDDING_BASE_URL=http://app-vllm-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1
 EMBEDDING_MODEL=Qwen3-Embedding-0.6B
 ENABLE_AUTH=false
 ```
