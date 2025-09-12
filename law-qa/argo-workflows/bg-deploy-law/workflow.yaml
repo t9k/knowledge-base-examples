@@ -1,0 +1,12 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: bg-deploy-law-
+spec:
+  workflowTemplateRef:
+    name: bg-deploy-law
+  arguments:
+    parameters:
+    - name: database-name
+      value: default
+

@@ -8,6 +8,12 @@ spec:
     parameters:
       - name: database-name
         description: "Database name for blue-green deployment"
+      - name: repository-url
+        description: "Git repository URL to clone in download step"
+        value: "https://www.modelscope.cn/datasets/qazwsxplkj/CAIL2018.git"
+      - name: gpu-vendor
+        description: "GPU vendor to use: enflame or nvidia"
+        value: "nvidia"
   volumes:
     - name: workspace
       persistentVolumeClaim:
@@ -26,8 +32,20 @@ spec:
               parameters:
                 - name: log-timestamp
                   value: "{{steps.prepare.outputs.parameters.log-timestamp}}"
-        - - name: db-insert
-            template: db-insert
+                - name: repository-url
+                  value: "{{workflow.parameters.repository-url}}"
+        - - name: db-insert-enflame
+            template: db-insert-enflame
+            when: "{{workflow.parameters.gpu-vendor}} == enflame"
+            arguments:
+              parameters:
+                - name: database-name
+                  value: "{{workflow.parameters.database-name}}"
+                - name: log-timestamp
+                  value: "{{steps.prepare.outputs.parameters.log-timestamp}}"
+        - - name: db-insert-nvidia
+            template: db-insert-nvidia
+            when: "{{workflow.parameters.gpu-vendor}} == nvidia"
             arguments:
               parameters:
                 - name: database-name
@@ -83,7 +101,8 @@ spec:
               echo "Collection name: $COLLECTION_NAME"
             fi
             
-            git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
+            git clone https://ghfast.top/https://github.com/t9k/knowledge-base-examples.git /tmp/repo
+            # git clone https://github.com/t9k/knowledge-base-examples.git /tmp/repo
             mkdir -p /workspace/scripts
             cp /tmp/repo/law-qa/argo-workflows/bg-deploy-criminal-case/*.sh /workspace/scripts/
             cp /tmp/repo/law-qa/argo-workflows/bg-deploy-criminal-case/*.py /workspace/scripts/
@@ -99,6 +118,7 @@ spec:
       inputs:
         parameters:
           - name: log-timestamp
+          - name: repository-url
       container:
         image: registry.cn-hangzhou.aliyuncs.com/t9k/alpine:argo-3.22
         command: [sh, -c]
@@ -113,7 +133,7 @@ spec:
             
             cd /workspace
             chmod +x /workspace/scripts/download.sh
-            /workspace/scripts/download.sh
+            /workspace/scripts/download.sh "{{inputs.parameters.repository-url}}"
             
             echo "=== Sync-files step completed at $(date) ==="
         volumeMounts:
@@ -121,8 +141,15 @@ spec:
             mountPath: /workspace
           - name: env-config
             mountPath: /env-config
- 
-    - name: db-insert
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 1
+          limits:
+            memory: 4Gi
+            cpu: 2
+
+    - name: db-insert-enflame
       inputs:
         parameters:
           - name: database-name
@@ -137,14 +164,14 @@ spec:
             LOG_FILE="$LOG_DIR/log.txt"
             mkdir -p "$LOG_DIR"
             exec > >(tee -a "${LOG_FILE}") 2>&1
-            echo "=== Starting db-insert step at $(date) ==="
+            echo "=== Starting db-insert (enflame) step at $(date) ==="
             
             # Run the insertion script
             export DATABASE_NAME="{{inputs.parameters.database-name}}"
             export LOG_FILE="${LOG_FILE}"
             HF_ENDPOINT=https://hf-mirror.com /workspace/scripts/db_insert.py
             
-            echo "=== db-insert step completed at $(date) ==="
+            echo "=== db-insert (enflame) step completed at $(date) ==="
             echo "=== Workflow completed successfully at $(date) ==="
         volumeMounts:
           - name: workspace
@@ -158,5 +185,44 @@ spec:
             cpu: 4
           limits:
             enflame.com/gcu: 1
+            memory: 16Gi
+            cpu: 8
+
+    - name: db-insert-nvidia
+      inputs:
+        parameters:
+          - name: database-name
+          - name: log-timestamp
+      container:
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/pytorch:2.8.0-milvus-bgem3-openai
+        command: [/bin/bash, -c]
+        args:
+          - |
+            set -e
+            LOG_DIR="/workspace/logs/bg-deploy-criminal-case_{{inputs.parameters.log-timestamp}}"
+            LOG_FILE="$LOG_DIR/log.txt"
+            mkdir -p "$LOG_DIR"
+            exec > >(tee -a "${LOG_FILE}") 2>&1
+            echo "=== Starting db-insert (nvidia) step at $(date) ==="
+            
+            # Run the insertion script
+            export DATABASE_NAME="{{inputs.parameters.database-name}}"
+            export LOG_FILE="${LOG_FILE}"
+            HF_ENDPOINT=https://hf-mirror.com /workspace/scripts/db_insert.py
+            
+            echo "=== db-insert (nvidia) step completed at $(date) ==="
+            echo "=== Workflow completed successfully at $(date) ==="
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: env-config
+            mountPath: /env-config
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: 8Gi
+            cpu: 4
+          limits:
+            nvidia.com/gpu: 1
             memory: 16Gi
             cpu: 8

@@ -18,7 +18,7 @@ server:
       size: 32Gi
       accessModes:
         - ReadWriteOnce
-      existingClaim: "llm"
+      existingClaim: "law-qa"
       subPath: "Qwen3-Embedding-0.6B"
 
   autoScaling:

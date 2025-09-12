@@ -3,11 +3,11 @@ FROM registry.qy.t9kcloud.cn/topsrider/jupyterlab-torch-2.3.0:20241224
 ENV HF_ENDPOINT=https://hf-mirror.com
 
 RUN pip install --no-cache-dir --upgrade pip && \
-pip install --no-cache-dir "pymilvus[model]"==2.5.10 fastmcp==2.8.1 openai==1.92.2 && \
+pip install --no-cache-dir fastmcp==2.8.1 openai==1.92.2 pymilvus[model]==2.5.10 requests==2.31.0 && \
 python -c "from pymilvus.model.hybrid import BGEM3EmbeddingFunction; BGEM3EmbeddingFunction(use_fp16=False, device='cpu')"
 
 WORKDIR /app
-COPY . .
+COPY server.py .
 EXPOSE 8000
 
 ENTRYPOINT ["python", "server.py"]

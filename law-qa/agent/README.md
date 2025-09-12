@@ -52,7 +52,7 @@ uv run python app.py --mode webui \
 
 可选头像：`--avatar ./chatbot.png`（默认同目录）。
 
-### OpenAI 兼容 API
+### OpenAI Compatible API
 
 ```bash
 uv run python app.py --mode api \
@@ -77,6 +77,59 @@ uv run python app.py --mode api \
       http://127.0.0.1:8001/v1/chat/completions
     ```
 
+## 使用 Docker 运行（OpenAI Compatible API）
+
+已提供 `Dockerfile`，用于直接以 API 模式启动。
+
+### 构建镜像
+
+```bash
+cd law-qa/agent
+docker build -t your-registry/law-agent:api .
+```
+
+### 本地运行
+
+```bash
+docker run --rm -p 8001:8001 \
+  -e CHAT_API_KEY=YOUR_KEY \
+  -e CHAT_BASE_URL=http://host.docker.internal:8000/v1 \
+  -e LAW_SEARCHER_URL=https://home.qy.t9kcloud.cn/mcp/law-searcher/mcp/ \
+  -e CASE_SEARCHER_URL=https://home.qy.t9kcloud.cn/mcp/case-searcher/mcp/ \
+  -e RERANKER_URL=https://home.qy.t9kcloud.cn/mcp/reranker/mcp/ \
+  your-registry/law-agent:api
+```
+
+默认命令会以 `--mode api --api-host 0.0.0.0 --api-port 8001` 启动；若需自定义可覆盖 `CMD` 或追加参数。
+
+### 健康检查与调用
+
+```bash
+curl http://127.0.0.1:8001/healthz
+curl -H "Authorization: Bearer YOUR_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"Qwen3-32B","messages":[{"role":"user","content":"你好"}]}' \
+  http://127.0.0.1:8001/v1/chat/completions
+```
+
+## 在 Kubernetes 部署（OpenAI Compatible API）
+
+已提供示例清单 `k8s.yaml`，包含 `Deployment`、`Service` 和 `Secret`，需要修改以下环境变量：
+
+   - `CHAT_BASE_URL`：LLM 的 vLLM 服务端点
+   - `LAW_SEARCHER_URL`、`CASE_SEARCHER_URL`、`RERANKER_URL`：MCP 服务地址
+   - `CHAT_API_KEY`：在 `Secret` 中设置
+
+应用清单：
+
+```bash
+kubectl apply -f k8s.yaml
+```
+
+服务暴露：
+
+- 集群内访问：`http://law-agent.default.svc.cluster.local:8001`
+- 若需公网访问，可为 `Service` 增加 `Ingress`（按你的 Ingress 控制器配置）。
+
 ## 常用参数
 
 - 模式与基础
@@ -98,9 +151,9 @@ uv run python app.py --mode api \
 
 ## 环境变量（可选）
 
-- `AGENT_MODEL`, `AGENT_MODEL_SERVER`, `AGENT_TOKENIZER_PATH`, `AGENT_MAX_TOKENS`
+- `CHAT_MODEL`, `CHAT_BASE_URL`, `AGENT_TOKENIZER_PATH`, `AGENT_MAX_TOKENS`
 - `LAW_SEARCHER_URL`, `CASE_SEARCHER_URL`, `RERANKER_URL`
-- `AGENT_API_HOST`, `AGENT_API_PORT`, `AGENT_API_KEY`
+- `AGENT_API_HOST`, `AGENT_API_PORT`, `CHAT_API_KEY`
 - `AGENT_AVATAR_PATH`
 
 示例：

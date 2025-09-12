@@ -14,4 +14,4 @@ data:
     CHAT_MODEL="Qwen3-32B"
     IS_PARENT_CHILD=true
     IS_LLM_EXTRACT=true
-    LLM_WORKERS=4
+    LLM_WORKERS=10

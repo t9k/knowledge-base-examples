@@ -374,7 +374,8 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
             def _accumulate_oai_message(data: List[Dict[str, Any]]) -> Dict[str, Any]:
                 # 将 Qwen Agent 累计消息合并为一个 OpenAI assistant message 的累计视图
                 message: Dict[str, Any] = {"role": "assistant", "content": "", "reasoning_content": "", "tool_calls": []}
-                seen_call_ids = set()
+                # 使用稳定键去重：name|arguments，避免同一个 function_id 覆盖多个不同调用
+                seen_tool_call_keys = set()
                 for item in data:
                     # reasoning 增量聚合
                     if isinstance(item, dict) and item.get("reasoning_content"):
@@ -385,24 +386,27 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
                     # 工具调用聚合（如存在 function_call）
                     if isinstance(item, dict) and item.get("function_call"):
                         fc = item.get("function_call") or {}
-                        func_id = (item.get("extra", {}) or {}).get("function_id")
-                        if not func_id:
-                            func_id = f"call_{len(message['tool_calls'])}"
                         # 仅在 arguments 为完整 JSON 时才采纳
                         args_str = _normalize_arguments(fc.get("arguments"))
                         try:
                             parsed_args = json.loads(args_str)
                             # 仅采纳非空对象参数
-                            if isinstance(parsed_args, dict) and parsed_args and func_id not in seen_call_ids:
+                            if isinstance(parsed_args, dict) and parsed_args:
+                                # 构造稳定去重键：name|arguments
+                                name = fc.get("name", "")
+                                key = f"{name}|{args_str}"
+                                if key in seen_tool_call_keys:
+                                    continue
                                 message["tool_calls"].append({
-                                    "id": func_id,
+                                    # id 不可靠时也允许为空，由上游累积逻辑处理
+                                    "id": (item.get("extra", {}) or {}).get("function_id") or f"call_{len(message['tool_calls'])}",
                                     "type": "function",
                                     "function": {
                                         "name": fc.get("name", ""),
                                         "arguments": args_str,
                                     }
                                 })
-                                seen_call_ids.add(func_id)
+                                seen_tool_call_keys.add(key)
                         except Exception:
                             # 非完整 JSON（增量中间态）不输出
                             pass
@@ -415,9 +419,12 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
                 ttft_s = None
                 last_content = ""
                 last_reasoning = ""
-                last_tool_calls_len = 0
                 last_tool_response = ""
                 collected_tool_calls: List[Dict[str, Any]] = []
+                # 跨批次工具调用去重集合：优先使用 function_id；否则回退 name|arguments
+                seen_tool_call_keys = set()
+                # 为下发到前端的工具调用分配本地唯一 ID，避免上游重复的 function_id 导致前端覆盖
+                tool_call_seq = 0
                 gen_t0 = time.perf_counter()
                 try:
                     for event in bot.run(messages=messages):
@@ -508,21 +515,26 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
                                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                                     last_reasoning = acc["reasoning_content"]
 
-                            # tool_calls 增量（如有新增，则逐条下发）
+                            # tool_calls 增量（跨批次去重）：如有未下发的新调用，则逐条下发
                             tool_calls = acc.get("tool_calls") or []
-                            if isinstance(tool_calls, list) and len(tool_calls) > last_tool_calls_len:
-                                for i in range(last_tool_calls_len, len(tool_calls)):
-                                    # 仅当该 tool_call 的 arguments 为完整 JSON 时才发送
+                            if isinstance(tool_calls, list) and tool_calls:
+                                for tc in tool_calls:
+                                    args_raw = (((tc or {}).get("function") or {}).get("arguments") or "{}")
                                     try:
-                                        tc = tool_calls[i]
-                                        args_raw = ((tc or {}).get("function") or {}).get("arguments", "{}")
                                         parsed_args = json.loads(args_raw)
-                                        # 仅当为非空对象时才下发
-                                        if not (isinstance(parsed_args, dict) and parsed_args):
-                                            continue
                                     except Exception:
-                                        # 跳过不完整或非JSON的增量 tool_call
                                         continue
+                                    if not (isinstance(parsed_args, dict) and parsed_args):
+                                        continue
+                                    name = (((tc.get("function") or {}).get("name")) or "")
+                                    # 以 name|arguments 为主键做去重，避免上游重复 function_id 导致误去重
+                                    key = f"name_args:{name}|{args_raw}"
+                                    if key in seen_tool_call_keys:
+                                        continue
+
+                                    tc_out = {**tc, "id": f"call_{tool_call_seq}"}
+                                    tool_call_seq += 1
+
                                     tc_chunk = {
                                         "id": f"chatcmpl-{created_ts}",
                                         "object": "chat.completion.chunk",
@@ -531,16 +543,13 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
                                         "choices": [
                                             {
                                                 "index": 0,
-                                                "delta": {"tool_calls": [tool_calls[i]]},
+                                                "delta": {"tool_calls": [tc_out]},
                                             }
                                         ],
                                     }
                                     yield f"data: {json.dumps(tc_chunk, ensure_ascii=False)}\n\n"
-                                    try:
-                                        collected_tool_calls.append(tool_calls[i])
-                                    except Exception:
-                                        pass
-                                last_tool_calls_len = len(tool_calls)
+                                    collected_tool_calls.append(tc_out)
+                                    seen_tool_call_keys.add(key)
 
                         elif isinstance(event, dict):
                             # 在 dict 事件中，若未发送首块则先发 role 初始化块
@@ -599,6 +608,7 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
                                 }
                                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                                 last_content += content_piece
+
                         elif isinstance(event, str):
                             # 兼容性：纯字符串片段视为 content 片段
                             if not first_chunk_sent:
@@ -751,6 +761,9 @@ def create_app(bot, model_name: str, api_key: Optional[str] = None, allow_cors: 
                 elif isinstance(event, list):
                     final_messages = event
         except Exception as e:
+            # 打印完整异常栈，便于排查具体错误原因
+            logger.exception("Exception occurred during non-streaming generation")
+            # 同时向客户端返回简要错误信息
             raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
         assistant_text: str = ""

@@ -19,8 +19,10 @@ spec:
     spec:
       containers:
       - name: mcp-server-law-searcher
-        image: registry.qy.t9kcloud.cn/topsrider/mcp-server:law-searcher-20250716
+        image: registry.cn-hangzhou.aliyuncs.com/t9k/mcp-server:law-searcher-20250912
+        # image: registry.qy.t9kcloud.cn/topsrider/mcp-server:law-searcher-20250904
         imagePullPolicy: Always
+        # args: ["--sse"]
         ports:
         - containerPort: 8000
           name: http
@@ -47,19 +49,13 @@ spec:
           requests:
             memory: 4Gi
             cpu: 2
-            enflame.com/gcu: "1"
+            nvidia.com/gpu: 1
+            # enflame.com/gcu: 1
           limits:
             memory: 8Gi
             cpu: 4
-            enflame.com/gcu: "1"
-        securityContext:
-          allowPrivilegeEscalation: false
-          runAsNonRoot: true
-          runAsUser: 1000
-          capabilities:
-            drop:
-            - ALL
-          readOnlyRootFilesystem: false
+            nvidia.com/gpu: 1
+            # enflame.com/gcu: 1
       restartPolicy: Always
       terminationGracePeriodSeconds: 30 
 

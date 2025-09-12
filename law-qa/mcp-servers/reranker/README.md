@@ -16,15 +16,12 @@
 #### HTTP 模式 (streamable-http)
 - **特点**: 传统的 HTTP 请求/响应模式
 - **适用场景**: 标准的 MCP 客户端集成
-- **路径**: `/mcp/reranker/`
+- **端点**: `/mcp/reranker/mcp/`
 
 #### SSE 模式 (Server-Sent Events)
 - **特点**: 实时双向流式通信
 - **适用场景**: 需要实时交互的应用
-- **路径**: `/mcp/reranker-sse/`
-- **端点**: 
-  - SSE 连接：`/mcp/reranker-sse/sse`
-  - 消息发送：`/mcp/reranker-sse/message`
+- **端点**: `/mcp/reranker/sse`
 
 ### 身份认证
 
@@ -39,20 +36,10 @@
 
 ### 在 Kubernetes 部署
 
-服务提供两种部署模式：
-
-#### HTTP 模式部署
-修改 `k8s.yaml` 中的 ConfigMap 和 VirtualService 配置，然后执行以下命令进行部署：
+修改 `k8s.yaml` 中的 Deployment 和 ConfigMap 配置，然后执行以下命令进行部署：
 
 ```bash
 kubectl apply -f k8s.yaml
-```
-
-#### SSE 模式部署
-修改 `k8s-sse.yaml` 中的 ConfigMap 和 VirtualService 配置，然后执行以下命令进行部署：
-
-```bash
-kubectl apply -f k8s-sse.yaml
 ```
 
 ### 在本地部署
@@ -60,7 +47,7 @@ kubectl apply -f k8s-sse.yaml
 1. 安装依赖：
 
 ```bash
-pip install fastmcp>=2.8.1 requests>=2.31.0 python-dotenv>=1.0.0 uvicorn>=0.24.0
+pip install -r requirements.txt
 ```
 
 2. 创建 `.env` 文件：
@@ -68,7 +55,7 @@ pip install fastmcp>=2.8.1 requests>=2.31.0 python-dotenv>=1.0.0 uvicorn>=0.24.0
 ```env
 # 重排序服务配置
 RERANKER_BASE_URL=http://localhost:8001
-RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+RERANKER_MODEL=Qwen3-Reranker-4B
 
 # 身份认证配置 (true/false)
 ENABLE_AUTH=false

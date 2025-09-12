@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: law-agent
+  labels:
+    app: law-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: law-agent
+  template:
+    metadata:
+      labels:
+        app: law-agent
+    spec:
+      containers:
+        - name: agent
+          image: registry.cn-hangzhou.aliyuncs.com/t9k/qwen-agent:law-qa-20250912
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8001
+          env:
+            - name: CHAT_MODEL
+              value: "Qwen3-32B"
+            - name: CHAT_BASE_URL
+              value: "http://vllm.default.svc.cluster.local:8000/v1"
+            - name: LAW_SEARCHER_URL
+              value: "https://home.qy.t9kcloud.cn/mcp/law-searcher/mcp/"
+            - name: CASE_SEARCHER_URL
+              value: "https://home.qy.t9kcloud.cn/mcp/case-searcher/mcp/"
+            - name: RERANKER_URL
+              value: "https://home.qy.t9kcloud.cn/mcp/reranker/mcp/"
+            - name: AGENT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: law-agent-secret
+                  key: api-key
+            - name: HF_ENDPOINT
+              value: "https://hf-mirror.com"
+          args:
+            - "python"
+            - "app.py"
+            - "--mode"
+            - "api"
+            - "--api-host"
+            - "0.0.0.0"
+            - "--api-port"
+            - "8001"
+            - "--allow-cors"
+            - "--law-searcher"
+            - "--case-searcher"
+            - "--reranker"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: law-agent
+  labels:
+    app: law-agent
+spec:
+  type: ClusterIP
+  selector:
+    app: law-agent
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001
+
+---
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: law-agent-secret
+type: Opaque
+stringData:
+  api-key: "dummy"
