@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 --milvus-uri=<URI> --embedding-base-url=<URL> --chat-base-url=<URL> [--git-repo-civil-case=<URL>] [--git-repo-criminal-case=<URL>] [--git-repo-cn-law=<URL>] [--is-llm-extract=<true|false>] [--llm-workers=<N>] [--gpu-vendor=<enflame|nvidia>]"
+  echo "Usage: $0 --milvus-uri=<URI> --embedding-base-url=<URL> --chat-base-url=<URL> [--git-repo-civil-case=<URL>] [--git-repo-criminal-case=<URL>] [--git-repo-cn-law=<URL>] [--is-llm-extract=<true|false>] [--llm-workers=<N>] [--gpu-resource=<nvidia.com/gpu|enflame.com/gcu>]"
 }
 
 MILVUS_URI=""
@@ -14,7 +14,7 @@ GIT_REPO_CRIMINAL_CASE=""
 GIT_REPO_CN_LAW=""
 IS_LLM_EXTRACT=""
 LLM_WORKERS=""
-GPU_VENDOR=""
+GPU_RESOURCE=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -74,12 +74,12 @@ while [ "$#" -gt 0 ]; do
       shift
       LLM_WORKERS="${1:-}"
       ;;
-    --gpu-vendor=*)
-      GPU_VENDOR="${1#*=}"
+    --gpu-resource=*)
+      GPU_RESOURCE="${1#*=}"
       ;;
-    --gpu-vendor)
+    --gpu-resource)
       shift
-      GPU_VENDOR="${1:-}"
+      GPU_RESOURCE="${1:-}"
       ;;
     -h|--help)
       usage
@@ -167,10 +167,10 @@ for dir in "$BASE_DIR"/bg-deploy-*; do
         ;;
     esac
 
-    # If a repo URL and/or gpu vendor is provided, generate a temp workflow manifest injecting parameters
-    if [ -n "$REPO_TO_INJECT" ] || [ -n "$GPU_VENDOR" ]; then
+    # If a repo URL and/or gpu resource is provided, generate a temp workflow manifest injecting parameters
+    if [ -n "$REPO_TO_INJECT" ] || [ -n "$GPU_RESOURCE" ]; then
       TMP_FILE="$(mktemp)"
-      awk -v repo="$REPO_TO_INJECT" -v gpu="$GPU_VENDOR" '
+      awk -v repo="$REPO_TO_INJECT" -v gpu="$GPU_RESOURCE" '
         BEGIN { added_repo=0; added_gpu=0 }
         # Replace existing repository-url value if present
         /^\s*-\s*name:\s*repository-url\s*$/ {
@@ -182,8 +182,8 @@ for dir in "$BASE_DIR"/bg-deploy-*; do
             print "      value: " repo; print; next
           }
         }
-        # Replace existing gpu-vendor value if present
-        /^\s*-\s*name:\s*gpu-vendor\s*$/ {
+        # Replace existing gpu-resource value if present
+        /^\s*-\s*name:\s*gpu-resource\s*$/ {
           print; getline;
           if (length(gpu) > 0) {
             if ($0 ~ /^\s*value:\s*/) {
@@ -198,7 +198,7 @@ for dir in "$BASE_DIR"/bg-deploy-*; do
         /^\s*parameters:\s*$/ {
           print;
           if (length(repo) > 0 && !added_repo) { print "    - name: repository-url"; print "      value: " repo; added_repo=1 }
-          if (length(gpu) > 0 && !added_gpu) { print "    - name: gpu-vendor"; print "      value: " gpu; added_gpu=1 }
+          if (length(gpu) > 0 && !added_gpu) { print "    - name: gpu-resource"; print "      value: " gpu; added_gpu=1 }
           next
         }
         { print }

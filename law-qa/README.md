@@ -6,7 +6,7 @@
 
 该项目构建了一个完整的法律知识检索和问答系统，包含：
 
-- **法律数据处理**：处理刑事案例、民事案例和法律法规数据
+- **法律数据处理**：处理刑事案例、民事案例和法律法规数据并导入向量数据库
 - **向量检索服务**：基于 MCP 协议的多种检索服务
 - **模型部署**：支持多种 LLM 和嵌入模型的部署配置
 - **Agent 实现**：使用 Qwen Agent 实现智能法律问答 Agent
@@ -15,19 +15,19 @@
 
 ```
 law-qa/
-├── agent/               # Agent 实现
-├── app-configs/         # 应用部署配置
-│   ├── milvus/          # Milvus 向量数据库配置
-│   └── vllm/            # vLLM 模型服务配置
-├── argo-workflows/      # Argo Workflows 工作流
+├── agent/                 # Agent 实现（兼容 OpenAI API）
+├── argo-workflows/        # Argo Workflows 工作流与脚本
 │   ├── bg-deploy-civil-case/    # 蓝绿发布民事案件数据
 │   ├── bg-deploy-criminal-case/ # 蓝绿发布刑事案件数据
 │   └── bg-deploy-law/           # 蓝绿发布法律法规数据
-├── data/                # 数据处理脚本和文档
-└── mcp-servers/         # MCP 检索服务
-    ├── case-searcher/   # 案例检索服务
-    ├── law-searcher/    # 法条检索服务
-    └── reranker/        # 重排服务
+├── mcp-servers/           # MCP 检索服务
+│   ├── case-searcher/     # 案例检索服务
+│   ├── law-searcher/      # 法条检索服务
+│   └── reranker/          # 重排服务
+└── platform-apps/         # 平台应用部署配置
+    ├── milvus/            # Milvus 向量数据库
+    ├── open-webui/        # Open WebUI
+    └── vllm/              # vLLM 模型服务
 ```
 
 ## 部署流程
@@ -42,11 +42,11 @@ law-qa/
 
 1. 创建一个名为 law-qa、大小 100Gi 的 PVC，然后安装一个同名的 JupyterLab 应用挂载该 PVC；进入 JupyterLab 应用的 UI，下载模型文件：
 
-```bash
-modelscope download --model "Qwen/Qwen3-32B" --local_dir "./Qwen3-32B"
-modelscope download --model "Qwen/Qwen3-Embedding-0.6B" --local_dir "./Qwen3-Embedding-0.6B"
-modelscope download --model "Qwen/Qwen3-Reranker-4B" --local_dir "./Qwen3-Reranker-4B"
-```
+    ```bash
+    modelscope download --model "Qwen/Qwen3-32B" --local_dir "./Qwen3-32B"
+    modelscope download --model "Qwen/Qwen3-Embedding-0.6B" --local_dir "./Qwen3-Embedding-0.6B"
+    modelscope download --model "Qwen/Qwen3-Reranker-4B" --local_dir "./Qwen3-Reranker-4B"
+    ```
 
 2. 安装多个 [vLLM 应用](./platform-apps/vllm/README.md)；
 3. 安装 [Milvus 应用](./platform-apps/milvus/README.md)；
@@ -72,9 +72,9 @@ modelscope download --model "Qwen/Qwen3-Reranker-4B" --local_dir "./Qwen3-Rerank
 
 1. 回到 JupyterLab 应用的 UI，拉取当前项目：
 
-```bash
-git clone https://github.com/t9k/knowledge-base-examples.git
-```
+    ```bash
+    git clone https://github.com/t9k/knowledge-base-examples.git
+    ```
 
 2. 执行脚本并提供必要的参数，以启动处理和导入数据的工作流：
 
@@ -86,20 +86,20 @@ git clone https://github.com/t9k/knowledge-base-examples.git
       --git-repo-civil-case https://www.modelscope.cn/datasets/qazwsxplkj/cn-judgment-docs-demo.git \
       --git-repo-criminal-case https://www.modelscope.cn/datasets/qazwsxplkj/CAIL2018.git \
       --git-repo-cn-law https://www.modelscope.cn/datasets/qazwsxplkj/cn-laws.git \
-      --is-llm-extract=true \
-      --llm-workers=4 \
-      TODO: --gpu-resource=nvidia.com/gpu
+      --is-llm-extract true \
+      --llm-workers 4 \
+      --gpu-resource nvidia.com/gpu
     ```
 
     这一步骤启动了处理和导入民事案件、刑事案件、法律法规 3 个 Argo Workflow。
 
 说明：
 
-- 上述过程启用了调用 LLM 提取元数据，这将成为数据处理与导入的瓶颈，导致工作流的运行时间长达数周。可采取以下优化措施：
+- 上述过程启用了调用 LLM 提取元数据，这将成为数据处理与导入的瓶颈，导致工作流的运行时间可能长达数周。可采取以下优化措施：
   1. 安装 [vLLM 应用](./platform-apps/vllm/README.md)部署 Qwen3-32B 模型时，增加副本数量，并增大 `--llm-workers` 参数的值（具体数值需要测试，以充分利用所有 vLLM 实例的并行处理能力，同时避免 OOM），提升并行度。
   2. fork 数据集仓库，删除部分文件以缩小数据规模。
-  3. 禁用 LLM 提取元数据，设置 `--is-llm-extract=false`。
-- 上述过程需要 NVIDIA GPU 加速（稀疏）嵌入模型的离线推理。如换用 Enflame GPU，请将 `--gpu-vendor=nvidia` 替换为 `--gpu-vendor=enflame`。
+  3. 禁用 LLM 提取元数据，设置 `--is-llm-extract false`。
+- 上述过程需要 NVIDIA GPU 加速（稀疏）嵌入模型的离线推理。如换用 Enflame GPU，请将 `--gpu-resource nvidia.com/gpu` 替换为 `--gpu-resource enflame.com/gcu`。
 - [此文档](./argo-workflows/data.md)记录了数据的基本信息，以及处理与入库的基本流程。
 
 **验证方法**
@@ -152,7 +152,7 @@ bg-deploy-law-                       bg-deploy-law-rjrgl              Succeeded
       --embedding-base-url <EMBEDDING_BASE_URL> \
       --reranker-base-url <RERANKER_BASE_URL> \
       --enable-auth false \
-      --gpu-vendor nvidia
+      --gpu-resource nvidia.com/gpu
     ```
 
     这一步骤启动了案件检索、法条检索和重排序 3 个 MCP 服务。对于每个服务，创建了以下 Kubernetes 资源：
@@ -164,17 +164,18 @@ bg-deploy-law-                       bg-deploy-law-rjrgl              Succeeded
 
 说明：
 
+- 部分 MCP 服务需要 NVIDIA GPU 加速（稀疏）嵌入模型的离线推理。如换用 Enflame GPU，请将 `--gpu-resource nvidia.com/gpu` 替换为 `--gpu-resource enflame.com/gcu`。
 - 3 个 MCP 服务的端点分别为：
   - `http://mcp-server-case-searcher-service.<YOUR_NAMESPACE>.svc.cluster.local/mcp/case-searcher/mcp/` 或 `http://mcp-server-case-searcher-service/mcp/case-searcher/mcp/`
   - `http://mcp-server-law-searcher-service.<YOUR_NAMESPACE>.svc.cluster.local/mcp/law-searcher/mcp/` 或 `http://mcp-server-law-searcher-service/mcp/law-searcher/mcp/`
   - `http://mcp-server-reranker-service.<YOUR_NAMESPACE>.svc.cluster.local/mcp/reranker/mcp/` 或 `http://mcp-server-reranker-service/mcp/reranker/mcp/`
 - 在 qy 集群部署的 MCP 服务暴露了**公网访问**，URL 如下：
 
-| 服务         | URL                                                |
-| ------------ | -------------------------------------------------- |
-| 案件检索服务 | https://home.qy.t9kcloud.cn/mcp/case-searcher/mcp/ |
-| 法条检索服务 | https://home.qy.t9kcloud.cn/mcp/law-searcher/mcp/  |
-| 重排序服务   | https://home.qy.t9kcloud.cn/mcp/reranker/mcp/      |
+    | 服务         | URL                                                |
+    | ------------ | -------------------------------------------------- |
+    | 案件检索服务 | https://home.qy.t9kcloud.cn/mcp/case-searcher/mcp/ |
+    | 法条检索服务 | https://home.qy.t9kcloud.cn/mcp/law-searcher/mcp/  |
+    | 重排序服务   | https://home.qy.t9kcloud.cn/mcp/reranker/mcp/      |
 
 **验证方法**
 

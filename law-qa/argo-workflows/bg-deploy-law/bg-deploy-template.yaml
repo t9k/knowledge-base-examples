@@ -11,9 +11,9 @@ spec:
       - name: repository-url
         description: "Git repository URL to clone in download step"
         value: "https://www.modelscope.cn/datasets/qazwsxplkj/cn-laws.git"
-      - name: gpu-vendor
-        description: "GPU vendor to use: enflame or nvidia"
-        value: "nvidia"
+      - name: gpu-resource
+        description: "K8s GPU resource to use: nvidia.com/gpu or enflame.com/gcu"
+        value: "nvidia.com/gpu"
   volumes:
     - name: workspace
       persistentVolumeClaim:
@@ -36,7 +36,7 @@ spec:
                   value: "{{workflow.parameters.repository-url}}"
         - - name: db-insert-enflame
             template: db-insert-enflame
-            when: "{{workflow.parameters.gpu-vendor}} == enflame"
+            when: '"{{workflow.parameters.gpu-resource}}" == "enflame.com/gcu"'
             arguments:
               parameters:
                 - name: database-name
@@ -45,7 +45,7 @@ spec:
                   value: "{{steps.prepare.outputs.parameters.log-timestamp}}"
         - - name: db-insert-nvidia
             template: db-insert-nvidia
-            when: "{{workflow.parameters.gpu-vendor}} == nvidia"
+            when: '"{{workflow.parameters.gpu-resource}}" == "nvidia.com/gpu"'
             arguments:
               parameters:
                 - name: database-name

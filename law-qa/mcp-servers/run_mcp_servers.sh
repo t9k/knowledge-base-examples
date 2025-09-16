@@ -3,14 +3,14 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 --milvus-uri=<URI> --embedding-base-url=<URL> [--milvus-db=<DB>] [--reranker-base-url=<URL>] [--enable-auth=<true|false>] [--gpu-vendor=<vendor>]"
+  echo "Usage: $0 --milvus-uri=<URI> --embedding-base-url=<URL> [--milvus-db=<DB>] [--reranker-base-url=<URL>] [--enable-auth=<true|false>] [--gpu-resource=<nvidia.com/gpu|enflame.com/gcu>]"
 }
 
 MILVUS_URI=""
 EMBEDDING_BASE_URL=""
 RERANKER_BASE_URL=""
 ENABLE_AUTH=""
-GPU_VENDOR=""
+GPU_RESOURCE=""
 MILVUS_DB="default"
 
 while [ "$#" -gt 0 ]; do
@@ -50,12 +50,12 @@ while [ "$#" -gt 0 ]; do
       shift
       MILVUS_DB="${1:-}"
       ;;
-    --gpu-vendor=*)
-      GPU_VENDOR="${1#*=}"
+    --gpu-resource=*)
+      GPU_RESOURCE="${1#*=}"
       ;;
-    --gpu-vendor)
+    --gpu-resource)
       shift
-      GPU_VENDOR="${1:-}"
+      GPU_RESOURCE="${1:-}"
       ;;
     -h|--help)
       usage
@@ -114,8 +114,8 @@ update_yaml_file() {
     sed_cmds+=("-e" "s|^([[:space:]]*)MILVUS_DB:[[:space:]]*.*$|\\1MILVUS_DB: \"$v\"|")
   fi
 
-  # When GPU vendor is enflame, swap the two image lines (uncomment qy, comment cn)
-  if [ "${GPU_VENDOR:-}" = "enflame" ]; then
+  # When GPU resource is enflame.com/gcu, swap the two image lines (uncomment qy, comment cn), and switch resources to enflame
+  if [ "${GPU_RESOURCE:-}" = "enflame.com/gcu" ]; then
     # Uncomment the qy image line
     sed_cmds+=("-e" "s|^([[:space:]]*)# image:[[:space:]]*registry\\.qy\\.t9kcloud\\.cn/topsrider/mcp-server:case-searcher-20250904[[:space:]]*$|\\1image: registry.qy.t9kcloud.cn/topsrider/mcp-server:case-searcher-20250904|")
     # Comment the cn-hangzhou image line
@@ -130,8 +130,8 @@ update_yaml_file() {
     sed_cmds+=("-e" "s|^([[:space:]]*)(nvidia\\.com/gpu:[[:space:]]*[^#].*)$|\\1# \\2|")
   fi
 
-  # If GPU vendor is None, comment out all NVIDIA GPU requests/limits
-  if [ "${GPU_VENDOR:-}" = "None" ] || [ "${GPU_VENDOR:-}" = "none" ] || [ "${GPU_VENDOR:-}" = "NONE" ]; then
+  # If GPU resource is None, comment out all NVIDIA GPU requests/limits
+  if [ "${GPU_RESOURCE:-}" = "None" ] || [ "${GPU_RESOURCE:-}" = "none" ] || [ "${GPU_RESOURCE:-}" = "NONE" ]; then
     sed_cmds+=("-e" "s|^([[:space:]]*)(nvidia\\.com/gpu:[[:space:]]*[^#].*)$|\\1# \\2|")
   fi
 

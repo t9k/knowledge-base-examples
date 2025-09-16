@@ -342,7 +342,7 @@ def main():
         # 如果是目录，递归处理目录及子目录下所有的md文件
         for root, _, files in os.walk(path):
             for file in files:
-                if file.endswith('.md') and "法" in file:
+                if file.endswith('.md'):
                     md_files.append(os.path.join(root, file))
 
         if not md_files:

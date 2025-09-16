@@ -120,4 +120,6 @@ data:
   MILVUS_COLLECTION_CIVIL_CASE_PARENT: "civil_case_parent"
   EMBEDDING_BASE_URL: "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
   EMBEDDING_MODEL: "Qwen3-Embedding-0.6B"
+  RERANKER_BASE_URL: "http://app-vllm-enflame-xxxxxxxx.demo.ksvc.qy.t9kcloud.cn/v1"
+  RERANKER_MODEL: "bge-reranker-v2-m3"
   ENABLE_AUTH: "false"
