@@ -100,7 +100,7 @@ law-qa/
   2. fork 数据集仓库，删除部分文件以缩小数据规模。
   3. 禁用 LLM 提取元数据，设置 `--is-llm-extract false`。
 - 上述过程需要 NVIDIA GPU 加速（稀疏）嵌入模型的离线推理。如换用 Enflame GPU，请将 `--gpu-resource nvidia.com/gpu` 替换为 `--gpu-resource enflame.com/gcu`。
-- [此文档](./argo-workflows/data.md)记录了数据的基本信息，以及处理与入库的基本流程。
+- [此文档](./argo-workflows/data.md)记录了数据的选取方法、基本信息，以及处理与入库的基本流程。
 
 **验证方法**
 
