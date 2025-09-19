@@ -368,15 +368,10 @@ def extract_metadata_with_llm(chunk, client):
             field_name, data = future.result()
             results[field_name] = data
 
-    if len(chunk) > 1200:
-        print(111)
-        print(chunk)
-        print(111)
+    if len(chunk) > 2000:
+        chunk = chunk[:2000]
 
     if len(results["dates"]) > 400:
-        print(222)
-        print(results["dates"])
-        print(222)
         results["dates"] = "<none>"
 
     if len(results["locations"]) > 200:
