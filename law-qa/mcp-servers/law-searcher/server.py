@@ -20,7 +20,6 @@ from pymilvus import (
 )
 from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 from openai import OpenAI
-import httpx
 from importlib import import_module
 from importlib import util as importlib_util
 
@@ -39,8 +38,7 @@ class MilvusConnector:
 
     def __init__(self, uri: str, token: str, db_name: str,
                  law_collection_name: str, embedding_base_url: str,
-                 embedding_model: str, reranker_base_url: str,
-                 reranker_model: str):
+                 embedding_model: str):
         self.uri = uri
         self.token = token
         connections.connect(uri=uri, token=token, db_name=db_name)
@@ -55,8 +53,6 @@ class MilvusConnector:
         self.embedding_client = OpenAI(base_url=embedding_base_url,
                                        api_key="dummy")
         self.embedding_model = embedding_model
-        self.reranker_base_url = reranker_base_url
-        self.reranker_model = reranker_model
 
     def check_collections(self) -> None:
         """Check if collections have the expected schema."""
@@ -243,73 +239,6 @@ class MilvusConnector:
         except Exception as e:
             raise ValueError(f"Hybrid search failed: {str(e)}")
 
-    async def rerank_results(self, results: list[dict], query_text: str,
-                             top_n: int) -> list[dict]:
-        """调用外部 reranker API：更新每个结果的 distance，并按分数降序返回前 top_n。
-
-        - 仅更新已有字段值，不改变项结构；只返回前 top_n 项。
-        - 使用构造参数中的 reranker_base_url 与 reranker_model。
-        - 请求体：{"model", "query", "documents"}；响应含 results[{index, relevance_score}]
-        - 打印调试信息便于验证。
-        """
-        try:
-
-            if not self.reranker_base_url or not self.reranker_model:
-                return results
-
-            documents: list[str] = []
-            for item in results:
-                entity = item.get("entity") or {}
-                chunk_text = entity.get("chunk") if isinstance(entity,
-                                                               dict) else None
-                if not chunk_text:
-                    chunk_text = item.get("chunk")
-                documents.append(
-                    str(chunk_text) if chunk_text is not None else "")
-
-            url = f"{self.reranker_base_url}/rerank"
-            payload = {
-                "model": self.reranker_model,
-                "query": query_text,
-                "documents": documents,
-            }
-
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            api_results = data.get("results") or []
-            if not isinstance(api_results, list) or not api_results:
-                return results
-
-            sorted_rerank = sorted(api_results,
-                                   key=lambda x: x.get("relevance_score", 0.0),
-                                   reverse=True)
-            top_n = max(1, min(int(top_n), len(sorted_rerank)))
-            top_rerank = sorted_rerank[:top_n]
-
-            selected: list[dict] = []
-            for r in top_rerank:
-                idx = r.get("index")
-                score = r.get("relevance_score")
-                if isinstance(idx, int) and 0 <= idx < len(results):
-                    item = results[idx]
-                    try:
-                        item["distance"] = float(
-                            score) if score is not None else item.get(
-                                "distance")
-                    except Exception:
-                        pass
-                    selected.append(item)
-
-            selected_sorted = sorted(selected,
-                                     key=lambda it:
-                                     (it.get("distance") or 0.0),
-                                     reverse=True)
-            return selected_sorted
-        except Exception as e:
-            return results
-
 
 class MilvusContext:
 
@@ -371,12 +300,7 @@ def format_grouped_sources(results: list[dict]) -> str:
         block_str = json.dumps(block, ensure_ascii=False, indent=4)
         output_parts.append(f'<source id="{i}">\n{block_str}\n</source>')
 
-    prompt = """如需在回答中引用检索结果，请使用行内引用格式 [n]，对应 <source id="n"></source>。
-
-注意：同一个 <source id="n"></source> 内可能包含多篇 document，引用任意一篇时都统一写作 [n]。
-
-行内引用示例：“根据研究，该方法可提升 20% 的效率 [1]。”"""
-    return "\n".join(output_parts) + "\n" + prompt
+    return "\n".join(output_parts)
 
 
 @asynccontextmanager
@@ -391,8 +315,6 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[MilvusContext]:
         law_collection_name=config.get("law_collection_name", "cn_law"),
         embedding_base_url=config.get("embedding_base_url"),
         embedding_model=config.get("embedding_model"),
-        reranker_base_url=config.get("reranker_base_url"),
-        reranker_model=config.get("reranker_model"),
     )
 
     try:
@@ -647,7 +569,7 @@ async def law_query(
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 20,
+              )] = 25,
     ctx: Context = None,
 ) -> str:
     """
@@ -696,25 +618,12 @@ async def law_sparse_search(
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 50,
+              )] = 25,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
             "Optional filter expression for metadata filtering, e.g. "
             "'chapter like \"%第三章%\"', 'section == \"%走私罪%\"'"))] = None,
-    rerank: Annotated[
-        bool,
-        Field(
-            description="Whether to call reranker model to rerank the results"
-        )] = True,
-    rerank_limit: Annotated[
-        int,
-        Field(
-            description="Maximum number of results to rerank and return",
-            ge=1,
-            le=100,
-        ),
-    ] = 15,
     ctx: Context = None,
 ) -> str:
     """
@@ -735,8 +644,6 @@ async def law_sparse_search(
             "query_text": query_text,
             "limit": limit,
             "filter_expr": filter_expr,
-            "rerank": rerank,
-            "rerank_limit": rerank_limit,
         }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
@@ -758,14 +665,6 @@ async def law_sparse_search(
             logger.warning(
                 "Retry without filter_expr failed in law_sparse_search: %s", e)
 
-    if rerank:
-        try:
-            connector = ctx.request_context.lifespan_context.connector
-            results = await connector.rerank_results(results, query_text,
-                                                     min(rerank_limit, limit))
-        except Exception as e:
-            logger.warning("Rerank failed in law_sparse_search: %s", e)
-
     response = format_grouped_sources(results)
     logger.info("Finished tool law_sparse_search, response preview: %s",
                 _preview(response, 1000))
@@ -778,25 +677,12 @@ async def law_dense_search(
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 50,
+              )] = 25,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
             "Optional filter expression for metadata filtering, e.g. "
             "'chapter like \"%第三章%\"', 'section == \"%走私罪%\"'"))] = None,
-    rerank: Annotated[
-        bool,
-        Field(
-            description="Whether to call reranker model to rerank the results"
-        )] = True,
-    rerank_limit: Annotated[
-        int,
-        Field(
-            description="Maximum number of results to rerank and return",
-            ge=1,
-            le=100,
-        ),
-    ] = 15,
     ctx: Context = None,
 ) -> str:
     """
@@ -817,8 +703,6 @@ async def law_dense_search(
             "query_text": query_text,
             "limit": limit,
             "filter_expr": filter_expr,
-            "rerank": rerank,
-            "rerank_limit": rerank_limit,
         }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(collection=connector.law_collection,
@@ -839,14 +723,6 @@ async def law_dense_search(
             logger.warning(
                 "Retry without filter_expr failed in law_dense_search: %s", e)
 
-    if rerank:
-        try:
-            connector = ctx.request_context.lifespan_context.connector
-            results = await connector.rerank_results(results, query_text,
-                                                     min(rerank_limit, limit))
-        except Exception as e:
-            logger.warning("Rerank failed in law_dense_search: %s", e)
-
     response = format_grouped_sources(results)
     logger.info("Finished tool law_dense_search, response preview: %s",
                 _preview(response, 1000))
@@ -859,25 +735,12 @@ async def law_hybrid_search(
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 50,
+              )] = 25,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
             "Optional filter expression for metadata filtering, e.g. "
             "'chapter like \"%第三章%\"', 'section == \"%走私罪%\"'"))] = None,
-    rerank: Annotated[
-        bool,
-        Field(
-            description="Whether to call reranker model to rerank the results"
-        )] = True,
-    rerank_limit: Annotated[
-        int,
-        Field(
-            description="Maximum number of results to rerank and return",
-            ge=1,
-            le=100,
-        ),
-    ] = 15,
     ctx: Context = None,
 ) -> str:
     """
@@ -898,8 +761,6 @@ async def law_hybrid_search(
             "query_text": query_text,
             "limit": limit,
             "filter_expr": filter_expr,
-            "rerank": rerank,
-            "rerank_limit": rerank_limit,
         }))
     connector = ctx.request_context.lifespan_context.connector
 
@@ -923,14 +784,6 @@ async def law_hybrid_search(
         except Exception as e:
             logger.warning(
                 "Retry without filter_expr failed in law_hybrid_search: %s", e)
-
-    if rerank:
-        try:
-            connector = ctx.request_context.lifespan_context.connector
-            results = await connector.rerank_results(results, query_text,
-                                                     min(rerank_limit, limit))
-        except Exception as e:
-            logger.warning("Rerank failed in law_hybrid_search: %s", e)
 
     response = format_grouped_sources(results)
     logger.info("Finished tool law_hybrid_search, response preview: %s",
@@ -959,8 +812,6 @@ if __name__ == "__main__":
         "law_collection_name": os.environ.get("MILVUS_COLLECTION"),
         "embedding_base_url": os.environ.get("EMBEDDING_BASE_URL"),
         "embedding_model": os.environ.get("EMBEDDING_MODEL"),
-        "reranker_base_url": os.environ.get("RERANKER_BASE_URL"),
-        "reranker_model": os.environ.get("RERANKER_MODEL"),
     }
 
     # 设备选择顺序：CUDA(GPU) -> GCU(Enflame) -> CPU

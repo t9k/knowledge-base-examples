@@ -22,7 +22,6 @@ from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 from openai import OpenAI
 from importlib import import_module
 from importlib import util as importlib_util
-import httpx
 
 logger = logging.getLogger("FastMCP.__main__")
 logger.setLevel(logging.INFO)
@@ -42,8 +41,7 @@ class MilvusConnector:
                  criminal_case_parent_collection_name: str,
                  civil_case_collection_name: str,
                  civil_case_parent_collection_name: str,
-                 embedding_base_url: str, embedding_model: str,
-                 reranker_base_url: str, reranker_model: str):
+                 embedding_base_url: str, embedding_model: str):
         self.uri = uri
         self.token = token
         connections.connect(uri=uri, token=token, db_name=db_name)
@@ -75,8 +73,6 @@ class MilvusConnector:
         self.embedding_client = OpenAI(base_url=embedding_base_url,
                                        api_key="dummy")
         self.embedding_model = embedding_model
-        self.reranker_base_url = reranker_base_url
-        self.reranker_model = reranker_model
 
     def check_collections(self) -> None:
         """Check if collections have the expected schema."""
@@ -493,70 +489,6 @@ class MilvusConnector:
         except Exception as e:
             raise ValueError(f"Hybrid search failed: {str(e)}")
 
-    async def rerank_results(self, results: list[dict], query_text: str,
-                             top_n: int) -> list[dict]:
-        """调用外部 reranker API：更新每个结果的 distance，并按分数降序返回前 top_n。
-
-        - 仅更新已有字段值，不改变项结构；只返回前 top_n 项。
-        - 使用构造参数中的 reranker_base_url 与 reranker_model。
-        - 请求体：{"model", "query", "documents"}；响应含 results[{index, relevance_score}]
-        - 打印调试信息便于验证。
-        """
-        try:
-            if not self.reranker_base_url or not self.reranker_model:
-                return results
-
-            documents: list[str] = []
-            for item in results:
-                # 优先使用父文档，否则使用子 chunk
-                chunk_text = _get_field(item, "parent_chunk") or _get_field(
-                    item, "chunk")
-                documents.append(
-                    str(chunk_text) if chunk_text is not None else "")
-
-            url = f"{self.reranker_base_url}/rerank"
-            payload = {
-                "model": self.reranker_model,
-                "query": query_text,
-                "documents": documents,
-            }
-
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            api_results = data.get("results") or []
-            if not isinstance(api_results, list) or not api_results:
-                return results
-
-            sorted_rerank = sorted(api_results,
-                                   key=lambda x: x.get("relevance_score", 0.0),
-                                   reverse=True)
-            top_n = max(1, min(int(top_n), len(sorted_rerank)))
-            top_rerank = sorted_rerank[:top_n]
-
-            selected: list[dict] = []
-            for r in top_rerank:
-                idx = r.get("index")
-                score = r.get("relevance_score")
-                if isinstance(idx, int) and 0 <= idx < len(results):
-                    item = results[idx]
-                    try:
-                        item["distance"] = float(
-                            score) if score is not None else _get_field(
-                                item, "distance")
-                    except Exception:
-                        pass
-                    selected.append(item)
-
-            selected_sorted = sorted(selected,
-                                     key=lambda it:
-                                     (_get_field(it, "distance") or 0.0),
-                                     reverse=True)
-            return selected_sorted
-        except Exception as e:
-            return results
-
 
 class MilvusContext:
 
@@ -602,11 +534,9 @@ def format_grouped_sources(results: list[dict], group_field: str) -> str:
             continue
         # 当 parent_child=True 时，connector 会在结果上填充 parent_chunk。
         # 此处若存在 parent_chunk，则优先使用父文档内容，否则回退到子 chunk。
-        chunk_text = _get_field(item, "parent_chunk") or _get_field(
-            item, "chunk")
+        chunk_text = _get_field(item, "parent_chunk") or _get_field(item, "chunk")
         distance = _get_field(item, "distance")
-        if chunk_text is not None and chunk_text not in groups[name][
-                "document"]:
+        if chunk_text is not None and chunk_text not in groups[name]["document"]:
             groups[name]["document"].append(chunk_text)
             if distance is not None:
                 groups[name]["distances"].append(distance)
@@ -623,12 +553,7 @@ def format_grouped_sources(results: list[dict], group_field: str) -> str:
         block_str = json.dumps(block, ensure_ascii=False, indent=4)
         output_parts.append(f'<source id="{i}">\n{block_str}\n</source>')
 
-    prompt = """如需在回答中引用检索结果，请使用行内引用格式 [n]，对应 <source id="n"></source>。
-
-注意：同一个 <source id="n"></source> 内可能包含多篇 document，引用任意一篇时都统一写作 [n]。
-
-行内引用示例：“根据研究，该方法可提升 20% 的效率 [1]。”"""
-    return "\n".join(output_parts) + "\n" + prompt
+    return "\n".join(output_parts)
 
 
 @asynccontextmanager
@@ -650,8 +575,6 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[MilvusContext]:
             "civil_case_parent_collection_name", "civil_case_parent"),
         embedding_base_url=config.get("embedding_base_url"),
         embedding_model=config.get("embedding_model"),
-        reranker_base_url=config.get("reranker_base_url"),
-        reranker_model=config.get("reranker_model"),
     )
 
     try:
@@ -716,10 +639,7 @@ async def criminal_case_query(
     - criminals_llm (VARCHAR): 犯罪人（通过 LLM 提取）
     """
     logger.info("Calling tool criminal_case_query, params: %s",
-                _preview({
-                    "filter_expr": filter_expr,
-                    "limit": limit
-                }))
+                _preview({"filter_expr": filter_expr, "limit": limit}))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.query(
         collection=connector.criminal_case_collection,
@@ -727,17 +647,14 @@ async def criminal_case_query(
         limit=limit)
     if not results:
         logger.info(
-            "First search returned empty in criminal_case_query, retrying without filter_expr"
-        )
+            "First search returned empty in criminal_case_query, retrying without filter_expr")
         try:
             results = await connector.query(
                 collection=connector.criminal_case_collection,
                 filter_expr=None,
                 limit=limit)
         except Exception as e:
-            logger.warning(
-                "Retry without filter_expr failed in criminal_case_query: %s",
-                e)
+            logger.warning("Retry without filter_expr failed in criminal_case_query: %s", e)
     response = format_grouped_sources(results, group_field="fact_id")
     logger.info("Finished tool criminal_case_query, response preview: %s",
                 _preview(response, 1000))
@@ -750,7 +667,7 @@ async def criminal_case_sparse_search(
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 50,
+              )] = 10,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
@@ -760,19 +677,6 @@ async def criminal_case_sparse_search(
     parent_child: Annotated[
         bool,
         Field(description="Whether to use Parent Document Retrieval")] = False,
-    rerank: Annotated[
-        bool,
-        Field(
-            description="Whether to call reranker model to rerank the results"
-        )] = True,
-    rerank_limit: Annotated[
-        int,
-        Field(
-            description="Maximum number of results to rerank and return",
-            ge=1,
-            le=100,
-        ),
-    ] = 15,
     ctx: Context = None,
 ) -> str:
     """
@@ -808,8 +712,6 @@ async def criminal_case_sparse_search(
             "limit": limit,
             "filter_expr": filter_expr,
             "parent_child": parent_child,
-            "rerank": rerank,
-            "rerank_limit": rerank_limit,
         }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
@@ -820,8 +722,7 @@ async def criminal_case_sparse_search(
         parent_child=parent_child)
     if not results:
         logger.info(
-            "First search returned empty in criminal_case_sparse_search, retrying without filter_expr"
-        )
+            "First search returned empty in criminal_case_sparse_search, retrying without filter_expr")
         try:
             results = await connector.sparse_search(
                 collection=connector.criminal_case_collection,
@@ -830,20 +731,10 @@ async def criminal_case_sparse_search(
                 filter_expr=None,
                 parent_child=parent_child)
         except Exception as e:
-            logger.warning(
-                "Retry without filter_expr failed in criminal_case_sparse_search: %s",
-                e)
-    if rerank:
-        try:
-            results = await connector.rerank_results(results, query_text,
-                                                     min(rerank_limit, limit))
-        except Exception as e:
-            logger.warning("Rerank failed in criminal_case_sparse_search: %s",
-                           e)
+            logger.warning("Retry without filter_expr failed in criminal_case_sparse_search: %s", e)
     response = format_grouped_sources(results, group_field="fact_id")
-    logger.info(
-        "Finished tool criminal_case_sparse_search, response preview: %s",
-        _preview(response, 1000))
+    logger.info("Finished tool criminal_case_sparse_search, response preview: %s",
+                _preview(response, 1000))
     return response
 
 
@@ -853,7 +744,7 @@ async def criminal_case_dense_search(
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 50,
+              )] = 10,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
@@ -863,19 +754,6 @@ async def criminal_case_dense_search(
     parent_child: Annotated[
         bool,
         Field(description="Whether to use Parent Document Retrieval")] = False,
-    rerank: Annotated[
-        bool,
-        Field(
-            description="Whether to call reranker model to rerank the results"
-        )] = True,
-    rerank_limit: Annotated[
-        int,
-        Field(
-            description="Maximum number of results to rerank and return",
-            ge=1,
-            le=100,
-        ),
-    ] = 15,
     ctx: Context = None,
 ) -> str:
     """
@@ -911,8 +789,6 @@ async def criminal_case_dense_search(
             "limit": limit,
             "filter_expr": filter_expr,
             "parent_child": parent_child,
-            "rerank": rerank,
-            "rerank_limit": rerank_limit,
         }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(
@@ -923,8 +799,7 @@ async def criminal_case_dense_search(
         parent_child=parent_child)
     if not results:
         logger.info(
-            "First search returned empty in criminal_case_dense_search, retrying without filter_expr"
-        )
+            "First search returned empty in criminal_case_dense_search, retrying without filter_expr")
         try:
             results = await connector.dense_search(
                 collection=connector.criminal_case_collection,
@@ -933,20 +808,10 @@ async def criminal_case_dense_search(
                 filter_expr=None,
                 parent_child=parent_child)
         except Exception as e:
-            logger.warning(
-                "Retry without filter_expr failed in criminal_case_dense_search: %s",
-                e)
-    if rerank:
-        try:
-            results = await connector.rerank_results(results, query_text,
-                                                     min(rerank_limit, limit))
-        except Exception as e:
-            logger.warning("Rerank failed in criminal_case_dense_search: %s",
-                           e)
+            logger.warning("Retry without filter_expr failed in criminal_case_dense_search: %s", e)
     response = format_grouped_sources(results, group_field="fact_id")
-    logger.info(
-        "Finished tool criminal_case_dense_search, response preview: %s",
-        _preview(response, 1000))
+    logger.info("Finished tool criminal_case_dense_search, response preview: %s",
+                _preview(response, 1000))
     return response
 
 
@@ -956,7 +821,7 @@ async def criminal_case_hybrid_search(
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 50,
+              )] = 10,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
@@ -966,19 +831,6 @@ async def criminal_case_hybrid_search(
     parent_child: Annotated[
         bool,
         Field(description="Whether to use Parent Document Retrieval")] = False,
-    rerank: Annotated[
-        bool,
-        Field(
-            description="Whether to call reranker model to rerank the results"
-        )] = True,
-    rerank_limit: Annotated[
-        int,
-        Field(
-            description="Maximum number of results to rerank and return",
-            ge=1,
-            le=100,
-        ),
-    ] = 15,
     ctx: Context = None,
 ) -> str:
     """
@@ -1014,8 +866,6 @@ async def criminal_case_hybrid_search(
             "limit": limit,
             "filter_expr": filter_expr,
             "parent_child": parent_child,
-            "rerank": rerank,
-            "rerank_limit": rerank_limit,
         }))
     connector = ctx.request_context.lifespan_context.connector
 
@@ -1028,8 +878,7 @@ async def criminal_case_hybrid_search(
     )
     if not results:
         logger.info(
-            "First search returned empty in criminal_case_hybrid_search, retrying without filter_expr"
-        )
+            "First search returned empty in criminal_case_hybrid_search, retrying without filter_expr")
         try:
             results = await connector.hybrid_search(
                 collection=connector.criminal_case_collection,
@@ -1039,20 +888,10 @@ async def criminal_case_hybrid_search(
                 parent_child=parent_child,
             )
         except Exception as e:
-            logger.warning(
-                "Retry without filter_expr failed in criminal_case_hybrid_search: %s",
-                e)
-    if rerank:
-        try:
-            results = await connector.rerank_results(results, query_text,
-                                                     min(rerank_limit, limit))
-        except Exception as e:
-            logger.warning("Rerank failed in criminal_case_hybrid_search: %s",
-                           e)
+            logger.warning("Retry without filter_expr failed in criminal_case_hybrid_search: %s", e)
     response = format_grouped_sources(results, group_field="fact_id")
-    logger.info(
-        "Finished tool criminal_case_hybrid_search, response preview: %s",
-        _preview(response, 1000))
+    logger.info("Finished tool criminal_case_hybrid_search, response preview: %s",
+                _preview(response, 1000))
     return response
 
 
@@ -1093,26 +932,21 @@ async def civil_case_query(
     - parties_llm (VARCHAR): 当事人（通过 LLM 提取）
     """
     logger.info("Calling tool civil_case_query, params: %s",
-                _preview({
-                    "filter_expr": filter_expr,
-                    "limit": limit
-                }))
+                _preview({"filter_expr": filter_expr, "limit": limit}))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.query(collection=connector.civil_case_collection,
                                     filter_expr=filter_expr,
                                     limit=limit)
     if not results:
         logger.info(
-            "First search returned empty in civil_case_query, retrying without filter_expr"
-        )
+            "First search returned empty in civil_case_query, retrying without filter_expr")
         try:
             results = await connector.query(
                 collection=connector.civil_case_collection,
                 filter_expr=None,
                 limit=limit)
         except Exception as e:
-            logger.warning(
-                "Retry without filter_expr failed in civil_case_query: %s", e)
+            logger.warning("Retry without filter_expr failed in civil_case_query: %s", e)
     response = format_grouped_sources(results, group_field="case_number")
     logger.info("Finished tool civil_case_query, response preview: %s",
                 _preview(response, 1000))
@@ -1125,7 +959,7 @@ async def civil_case_sparse_search(
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 50,
+              )] = 10,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
@@ -1135,19 +969,6 @@ async def civil_case_sparse_search(
     parent_child: Annotated[
         bool,
         Field(description="Whether to use Parent Document Retrieval")] = False,
-    rerank: Annotated[
-        bool,
-        Field(
-            description="Whether to call reranker model to rerank the results"
-        )] = True,
-    rerank_limit: Annotated[
-        int,
-        Field(
-            description="Maximum number of results to rerank and return",
-            ge=1,
-            le=100,
-        ),
-    ] = 15,
     ctx: Context = None,
 ) -> str:
     """
@@ -1184,8 +1005,6 @@ async def civil_case_sparse_search(
             "limit": limit,
             "filter_expr": filter_expr,
             "parent_child": parent_child,
-            "rerank": rerank,
-            "rerank_limit": rerank_limit,
         }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.sparse_search(
@@ -1196,8 +1015,7 @@ async def civil_case_sparse_search(
         parent_child=parent_child)
     if not results:
         logger.info(
-            "First search returned empty in civil_case_sparse_search, retrying without filter_expr"
-        )
+            "First search returned empty in civil_case_sparse_search, retrying without filter_expr")
         try:
             results = await connector.sparse_search(
                 collection=connector.civil_case_collection,
@@ -1206,15 +1024,7 @@ async def civil_case_sparse_search(
                 filter_expr=None,
                 parent_child=parent_child)
         except Exception as e:
-            logger.warning(
-                "Retry without filter_expr failed in civil_case_sparse_search: %s",
-                e)
-    if rerank:
-        try:
-            results = await connector.rerank_results(results, query_text,
-                                                     min(rerank_limit, limit))
-        except Exception as e:
-            logger.warning("Rerank failed in civil_case_sparse_search: %s", e)
+            logger.warning("Retry without filter_expr failed in civil_case_sparse_search: %s", e)
     response = format_grouped_sources(results, group_field="case_number")
     logger.info("Finished tool civil_case_sparse_search, response preview: %s",
                 _preview(response, 1000))
@@ -1227,7 +1037,7 @@ async def civil_case_dense_search(
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 50,
+              )] = 10,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
@@ -1237,19 +1047,6 @@ async def civil_case_dense_search(
     parent_child: Annotated[
         bool,
         Field(description="Whether to use Parent Document Retrieval")] = False,
-    rerank: Annotated[
-        bool,
-        Field(
-            description="Whether to call reranker model to rerank the results"
-        )] = True,
-    rerank_limit: Annotated[
-        int,
-        Field(
-            description="Maximum number of results to rerank and return",
-            ge=1,
-            le=100,
-        ),
-    ] = 15,
     ctx: Context = None,
 ) -> str:
     """
@@ -1286,8 +1083,6 @@ async def civil_case_dense_search(
             "limit": limit,
             "filter_expr": filter_expr,
             "parent_child": parent_child,
-            "rerank": rerank,
-            "rerank_limit": rerank_limit,
         }))
     connector = ctx.request_context.lifespan_context.connector
     results = await connector.dense_search(
@@ -1298,8 +1093,7 @@ async def civil_case_dense_search(
         parent_child=parent_child)
     if not results:
         logger.info(
-            "First search returned empty in civil_case_dense_search, retrying without filter_expr"
-        )
+            "First search returned empty in civil_case_dense_search, retrying without filter_expr")
         try:
             results = await connector.dense_search(
                 collection=connector.civil_case_collection,
@@ -1308,15 +1102,7 @@ async def civil_case_dense_search(
                 filter_expr=None,
                 parent_child=parent_child)
         except Exception as e:
-            logger.warning(
-                "Retry without filter_expr failed in civil_case_dense_search: %s",
-                e)
-    if rerank:
-        try:
-            results = await connector.rerank_results(results, query_text,
-                                                     min(rerank_limit, limit))
-        except Exception as e:
-            logger.warning("Rerank failed in civil_case_dense_search: %s", e)
+            logger.warning("Retry without filter_expr failed in civil_case_dense_search: %s", e)
     response = format_grouped_sources(results, group_field="case_number")
     logger.info("Finished tool civil_case_dense_search, response preview: %s",
                 _preview(response, 1000))
@@ -1329,7 +1115,7 @@ async def civil_case_hybrid_search(
     limit: Annotated[
         int,
         Field(description="Maximum number of results to return", ge=1, le=100
-              )] = 50,
+              )] = 10,
     filter_expr: Annotated[
         Optional[str],
         Field(description=(
@@ -1339,19 +1125,6 @@ async def civil_case_hybrid_search(
     parent_child: Annotated[
         bool,
         Field(description="Whether to use Parent Document Retrieval")] = False,
-    rerank: Annotated[
-        bool,
-        Field(
-            description="Whether to call reranker model to rerank the results"
-        )] = True,
-    rerank_limit: Annotated[
-        int,
-        Field(
-            description="Maximum number of results to rerank and return",
-            ge=1,
-            le=100,
-        ),
-    ] = 15,
     ctx: Context = None,
 ) -> str:
     """
@@ -1388,8 +1161,6 @@ async def civil_case_hybrid_search(
             "limit": limit,
             "filter_expr": filter_expr,
             "parent_child": parent_child,
-            "rerank": rerank,
-            "rerank_limit": rerank_limit,
         }))
     connector = ctx.request_context.lifespan_context.connector
 
@@ -1402,8 +1173,7 @@ async def civil_case_hybrid_search(
     )
     if not results:
         logger.info(
-            "First search returned empty in civil_case_hybrid_search, retrying without filter_expr"
-        )
+            "First search returned empty in civil_case_hybrid_search, retrying without filter_expr")
         try:
             results = await connector.hybrid_search(
                 collection=connector.civil_case_collection,
@@ -1413,16 +1183,9 @@ async def civil_case_hybrid_search(
                 parent_child=parent_child,
             )
         except Exception as e:
-            logger.warning(
-                "Retry without filter_expr failed in civil_case_hybrid_search: %s",
-                e)
-    if rerank:
-        try:
-            results = await connector.rerank_results(results, query_text,
-                                                     min(rerank_limit, limit))
-        except Exception as e:
-            logger.warning("Rerank failed in civil_case_hybrid_search: %s", e)
+            logger.warning("Retry without filter_expr failed in civil_case_hybrid_search: %s", e)
 
+    
     response = format_grouped_sources(results, group_field="case_number")
     logger.info("Finished tool civil_case_hybrid_search, response preview: %s",
                 _preview(response, 1000))
@@ -1462,10 +1225,6 @@ if __name__ == "__main__":
         os.environ.get("EMBEDDING_BASE_URL"),
         "embedding_model":
         os.environ.get("EMBEDDING_MODEL"),
-        "reranker_base_url":
-        os.environ.get("RERANKER_BASE_URL"),
-        "reranker_model":
-        os.environ.get("RERANKER_MODEL"),
     }
 
     # 设备选择顺序：CUDA(GPU) -> GCU(Enflame) -> CPU

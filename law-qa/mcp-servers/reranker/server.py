@@ -1,7 +1,7 @@
 import argparse
 import os
-import ast
 import re
+import json
 from typing import Annotated
 from pydantic import Field
 from dotenv import load_dotenv
@@ -36,91 +36,143 @@ else:
 
 @mcp.tool()
 async def rerank(
+    query_text: Annotated[str, Field(description="Query text to rerank against")],
     search_results: Annotated[
-        str, Field(description="Search results from search tools")],
+        str, Field(description="This parameter is automatically generated, no need to pass manually")],
     top_n: Annotated[
         int,
-        Field(description="Number of top results to return", ge=1, le=20)] = 5,
+        Field(description="Number of top results to return", ge=10, le=30)] = 20,
+    threshold: Annotated[
+        float,
+        Field(description="Minimum relevance score threshold for filtering documents", ge=0.0, le=1.0)] = 0.2,
     ctx: Context = None,
 ) -> str:
-    """对检索结果进行重排序。适用于检索结果较多、需要高 precision 的情况。
+    """对检索结果进行重排序。适用于检索结果较多、需要高 precision 的情况。"""
+
+    # 解析 <source> 格式
+    source_pattern = r'<source id="(\d+)">\s*\n(.*?)\n</source>'
+    source_matches = re.findall(source_pattern, search_results, re.DOTALL)
     
-    注意：
-
-    1. 必须将 law-searcher 或 case-searcher 的 search 系列工具返回的字符串原封不动地传入到
-        search_results 参数，例如 "Sparse vector search results for '行纪合同':\n\n{'chunk_id': ...
-    """
-
-    # 解析搜索结果
-    parts = search_results.split("\n\n")
-    if len(parts) < 2:
-        return "Error: Invalid search results format"
-
-    # 提取 query 从第一行
-    first_line = parts[0]
-    query_match = re.search(r"'([^']+)'", first_line)
-    if not query_match:
-        return "Error: Could not extract query from search results"
-
-    query = query_match.group(1)
-
-    # 解析每个结果并提取 chunk
+    if not source_matches:
+        return "Error: No valid <source> blocks found in search results"
+    
+    # 解析每个 source 块
     documents = []
-    original_results = []
-
-    for part in parts[1:]:
-        if part.strip():
-            try:
-                # 使用 ast.literal_eval 安全解析字典字符串
-                result_dict = ast.literal_eval(part.strip())
-                chunk = result_dict.get('entity', {}).get('chunk', '')
-                if chunk:
-                    documents.append(chunk.strip())
-                    original_results.append(result_dict)
-            except (ValueError, SyntaxError) as e:
-                # 如果解析失败，跳过这个结果
-                continue
-
+    source_info = []
+    doc_to_source = []  # 记录每个文档属于哪个source和在该source中的索引
+    
+    for source_id, source_content in source_matches:
+        try:
+            # 解析JSON内容
+            source_data = json.loads(source_content.strip())
+            source_name = source_data.get("source", {}).get("name", "")
+            documents_list = source_data.get("document", [])
+            distances_list = source_data.get("distances", [])
+            
+            source_info.append({
+                "id": source_id,
+                "name": source_name,
+                "documents": documents_list,
+                "distances": distances_list
+            })
+            
+            # 将该source的所有文档添加到总文档列表
+            for doc_idx, doc in enumerate(documents_list):
+                documents.append(doc.strip())
+                doc_to_source.append((len(source_info) - 1, doc_idx))  # (source_index, doc_index)
+                
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning(f"Failed to parse source {source_id}: {e}")
+            continue
+    
     if not documents:
         return "Error: No valid documents found in search results"
-
+    
     # 调用 reranker API
     url = f"{reranker_base_url}/rerank"
     headers = {"Content-Type": "application/json"}
-
-    data = {"model": reranker_model, "query": query, "documents": documents}
-
+    data = {"model": reranker_model, "query": query_text, "documents": documents}
+    
     try:
         response = requests.post(url, json=data, headers=headers)
         response.raise_for_status()
         rerank_results = response.json()
     except requests.exceptions.RequestException as e:
         return f"Error calling reranker API: {str(e)}"
-
-    # 解析重排序结果并添加 relevance_score
+    
     if 'results' not in rerank_results:
         return "Error: Invalid reranker response format"
-
-    # 按照 relevance_score 排序并取前 top_n 个
+    
+    # 按照 relevance_score 排序
     sorted_results = sorted(rerank_results['results'],
                             key=lambda x: x['relevance_score'],
-                            reverse=True)[:top_n]
-
-    # 构建输出结果
-    output = f"Reranking results for '{query}':\n\n"
-
+                            reverse=True)
+    
+    # 重构source结构，用重排序分数替换distance
+    # 首先收集每个source中被选中的文档
+    source_selected_docs = {}  # source_index -> [(doc_index, relevance_score)]
+    
+    selected_count = 0
     for rerank_result in sorted_results:
-        index = rerank_result['index']
+        if selected_count >= top_n:
+            break
+            
+        doc_global_index = rerank_result['index']
         relevance_score = rerank_result['relevance_score']
-
-        if index < len(original_results):
-            # 创建结果副本并添加 relevance_score
-            result_copy = original_results[index].copy()
-            result_copy['relevance_score'] = relevance_score
-
-            output += f"{result_copy}\n\n"
-
-    return output
+        
+        # 过滤掉分数低于阈值的文档
+        if relevance_score < threshold:
+            continue
+        
+        if doc_global_index < len(doc_to_source):
+            source_idx, doc_idx = doc_to_source[doc_global_index]
+            
+            if source_idx not in source_selected_docs:
+                source_selected_docs[source_idx] = []
+            source_selected_docs[source_idx].append((doc_idx, relevance_score))
+            selected_count += 1
+    
+    # 重构输出 - 按最大距离分数排序
+    output_sources = []
+    source_with_max_scores = []
+    
+    for source_idx in source_selected_docs.keys():
+        source = source_info[source_idx]
+        selected_docs_info = source_selected_docs[source_idx]
+        
+        # 按原始顺序排序选中的文档
+        selected_docs_info.sort(key=lambda x: x[0])
+        
+        new_documents = []
+        new_distances = []
+        
+        for doc_idx, relevance_score in selected_docs_info:
+            new_documents.append(source["documents"][doc_idx])
+            new_distances.append(relevance_score)
+        
+        # 计算该source的最大距离分数
+        max_distance = max(new_distances) if new_distances else 0
+        
+        # 构建新的source块
+        new_source = {
+            "source": {
+                "name": source["name"]
+            },
+            "document": new_documents,
+            "distances": new_distances
+        }
+        
+        source_with_max_scores.append((max_distance, new_source))
+    
+    # 按最大距离分数从大到小排序
+    source_with_max_scores.sort(key=lambda x: x[0], reverse=True)
+    
+    # 重新编号并生成输出
+    for new_source_id, (max_score, source_data) in enumerate(source_with_max_scores, 1):
+        source_json = json.dumps(source_data, ensure_ascii=False, indent=4)
+        output_sources.append(f'<source id="{new_source_id}">\n{source_json}\n</source>')
+    
+    return "\n\n".join(output_sources)
 
 
 @mcp.custom_route("/health", methods=["GET"])
