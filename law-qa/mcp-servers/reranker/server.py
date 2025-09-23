@@ -110,27 +110,41 @@ async def rerank(
     
     # 重构source结构，用重排序分数替换distance
     # 首先收集每个source中被选中的文档
-    source_selected_docs = {}  # source_index -> [(doc_index, relevance_score)]
+    def collect_selected_docs(current_threshold):
+        source_selected_docs = {}  # source_index -> [(doc_index, relevance_score)]
+        selected_count = 0
+        
+        for rerank_result in sorted_results:
+            if selected_count >= top_n:
+                break
+                
+            doc_global_index = rerank_result['index']
+            relevance_score = rerank_result['relevance_score']
+            
+            # 过滤掉分数低于阈值的文档
+            if relevance_score < current_threshold:
+                continue
+            
+            if doc_global_index < len(doc_to_source):
+                source_idx, doc_idx = doc_to_source[doc_global_index]
+                
+                if source_idx not in source_selected_docs:
+                    source_selected_docs[source_idx] = []
+                source_selected_docs[source_idx].append((doc_idx, relevance_score))
+                selected_count += 1
+        
+        return source_selected_docs, selected_count
     
-    selected_count = 0
-    for rerank_result in sorted_results:
-        if selected_count >= top_n:
-            break
-            
-        doc_global_index = rerank_result['index']
-        relevance_score = rerank_result['relevance_score']
-        
-        # 过滤掉分数低于阈值的文档
-        if relevance_score < threshold:
-            continue
-        
-        if doc_global_index < len(doc_to_source):
-            source_idx, doc_idx = doc_to_source[doc_global_index]
-            
-            if source_idx not in source_selected_docs:
-                source_selected_docs[source_idx] = []
-            source_selected_docs[source_idx].append((doc_idx, relevance_score))
-            selected_count += 1
+    # 首次尝试使用原始threshold
+    current_threshold = threshold
+    source_selected_docs, selected_count = collect_selected_docs(current_threshold)
+    
+    # 检查source数量是否小于5，如果是则降低threshold重试一次
+    if len(source_selected_docs) < 5:
+        logger.info(f"Found only {len(source_selected_docs)} sources with threshold {current_threshold:.3f}, adjusting threshold to {current_threshold * 0.6:.3f} for retry")
+        current_threshold = current_threshold * 0.6
+        source_selected_docs, selected_count = collect_selected_docs(current_threshold)
+        logger.info(f"After threshold adjustment, found {len(source_selected_docs)} sources with {selected_count} total documents")
     
     # 重构输出 - 按最大距离分数排序
     output_sources = []

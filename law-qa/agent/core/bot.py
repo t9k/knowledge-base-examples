@@ -1,9 +1,9 @@
 from typing import Dict, Any
-from qwen_agent.agents import Assistant
 from .config import AgentConfig
+from .agent import LawQaAgent
 
 
-def create_bot(config: AgentConfig) -> Assistant:
+def create_bot(config: AgentConfig) -> LawQaAgent:
     llm_cfg: Dict[str, Any] = {
         'model': config.model,
         'model_server': config.model_server,
@@ -43,7 +43,7 @@ def create_bot(config: AgentConfig) -> Assistant:
 
     system_prompt = config_system_prompt()
 
-    bot = Assistant(
+    bot = LawQaAgent(
         llm=llm_cfg,
         system_message=system_prompt,
         function_list=tools,
