@@ -368,9 +368,6 @@ def extract_metadata_with_llm(chunk, client):
             field_name, data = future.result()
             results[field_name] = data
 
-    if len(chunk) > 2000:
-        chunk = chunk[:2000]
-
     if len(results["dates"]) > 400:
         results["dates"] = "<none>"
 
@@ -380,7 +377,7 @@ def extract_metadata_with_llm(chunk, client):
     if len(results["people"]) > 500:
         results["people"] = "<none>"
 
-    if len(results["numbers"]) > 400:
+    if len(results["numbers"]) > 300:
         results["numbers"] = "<none>"
 
     if len(results["parties_llm"]) > 200:
@@ -623,7 +620,7 @@ def insert_batch(col, buffer, ef, parent_col):
     to_insert = [
         [r["chunk_id"] for r in buffer],
         [r["case_id"] for r in buffer],
-        [r["chunk"] for r in buffer],
+        [r["chunk"][:2000] for r in buffer],    # 截取前2000个字符
         [r["case_number"] for r in buffer],
         [r["case_name"] for r in buffer],
         [r["court"] for r in buffer],

@@ -113,6 +113,7 @@ async def rerank(
     def collect_selected_docs(current_threshold):
         source_selected_docs = {}  # source_index -> [(doc_index, relevance_score)]
         selected_count = 0
+        selected_case_count = 0
         
         for rerank_result in sorted_results:
             if selected_count >= top_n:
@@ -120,18 +121,25 @@ async def rerank(
                 
             doc_global_index = rerank_result['index']
             relevance_score = rerank_result['relevance_score']
-            
+            doc_length = len(rerank_result['document']['text'])
+
             # 过滤掉分数低于阈值的文档
             if relevance_score < current_threshold:
                 continue
             
+            # 长度 > 1000 的文档认为是案例，最多选10个
+            if doc_length > 1000 and selected_case_count >= 10:
+                continue
+
             if doc_global_index < len(doc_to_source):
                 source_idx, doc_idx = doc_to_source[doc_global_index]
-                
+
                 if source_idx not in source_selected_docs:
                     source_selected_docs[source_idx] = []
                 source_selected_docs[source_idx].append((doc_idx, relevance_score))
                 selected_count += 1
+                if doc_length > 1000:
+                    selected_case_count += 1
         
         return source_selected_docs, selected_count
     
