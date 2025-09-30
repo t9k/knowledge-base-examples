@@ -1,6 +1,7 @@
 import copy
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Iterator, List, Literal, Optional, Union
 
 from qwen_agent.agents.fncall_agent import FnCallAgent
@@ -40,7 +41,7 @@ class LawQaAgent(FnCallAgent):
                 # Check if there's a reranker-rerank tool call in output
                 has_rerank_tool = False
                 rerank_tool_calls = []
-                other_tool_calls = []
+                search_tool_calls = []
                 
                 for out in output:
                     use_tool, tool_name, tool_args, _ = self._detect_tool(out)
@@ -49,36 +50,39 @@ class LawQaAgent(FnCallAgent):
                             has_rerank_tool = True
                             rerank_tool_calls.append((out, tool_name, tool_args))
                         else:
-                            other_tool_calls.append((out, tool_name, tool_args))
+                            search_tool_calls.append((out, tool_name, tool_args))
                 
                 if has_rerank_tool:
                     # Special handling for reranker-rerank: collect search results in buffer
                     search_results_buffer = []
                     
-                    # First execute all non-rerank tools and collect their results
-                    for out, tool_name, tool_args in other_tool_calls:
-                        tool_result = self._call_tool(tool_name, tool_args, messages=messages, **kwargs)
-                        # Renumber <source id="..."> blocks to be globally unique within this run
-                        try:
-                            tool_result, inc = self._renumber_source_blocks(tool_result, start_index=global_source_id_counter + 1)
-                            global_source_id_counter += inc
-                        except Exception:
-                            # If anything goes wrong during renumbering, fall back to original content
-                            pass
+                    # Execute all non-rerank tools in parallel and collect their results
+                    if search_tool_calls:
+                        parallel_results = self._execute_tools_parallel(search_tool_calls, messages, **kwargs)
                         
-                        # Add to buffer for later use in rerank
-                        search_results_buffer.append(tool_result)
-                        
-                        # Create Message with placeholder content and add to messages/response
-                        fn_msg = Message(role=FUNCTION,
-                                         name=tool_name,
-                                         content="见重排结果",
-                                         extra={'function_id': out.extra.get('function_id', '1')})
-                        
-                        messages.append(fn_msg)
-                        response.append(fn_msg)
-                        yield response
-                        used_any_tool = True
+                        # Process results in the original order
+                        for (out, tool_name, tool_args), tool_result in zip(search_tool_calls, parallel_results):
+                            # Renumber <source id="..."> blocks to be globally unique within this run
+                            try:
+                                tool_result, inc = self._renumber_source_blocks(tool_result, start_index=global_source_id_counter + 1)
+                                global_source_id_counter += inc
+                            except Exception:
+                                # If anything goes wrong during renumbering, fall back to original content
+                                pass
+                            
+                            # Add to buffer for later use in rerank
+                            search_results_buffer.append(tool_result)
+                            
+                            # Create Message with placeholder content and add to messages/response
+                            fn_msg = Message(role=FUNCTION,
+                                             name=tool_name,
+                                             content="见重排结果",
+                                             extra={'function_id': out.extra.get('function_id', '1')})
+                            
+                            messages.append(fn_msg)
+                            response.append(fn_msg)
+                            yield response
+                            used_any_tool = True
                     
                     # Then execute rerank tools with concatenated search results
                     for out, tool_name, tool_args in rerank_tool_calls:
@@ -87,7 +91,7 @@ class LawQaAgent(FnCallAgent):
                             args_dict = json.loads(tool_args)
                         else:
                             args_dict = tool_args.copy()
-                        
+
                         # Concatenate all search results as search_results parameter
                         concatenated_results = '\n\n'.join(search_results_buffer)
                         args_dict['search_results'] = concatenated_results
@@ -105,31 +109,68 @@ class LawQaAgent(FnCallAgent):
                         response.append(fn_msg)
                         yield response
                         used_any_tool = True
-                else:
-                    # Original logic for cases without reranker-rerank
-                    for out in output:
-                        use_tool, tool_name, tool_args, _ = self._detect_tool(out)
-                        if use_tool:
-                            tool_result = self._call_tool(tool_name, tool_args, messages=messages, **kwargs)
-                            # Renumber <source id="..."> blocks to be globally unique within this run
-                            try:
-                                tool_result, inc = self._renumber_source_blocks(tool_result, start_index=global_source_id_counter + 1)
-                                global_source_id_counter += inc
-                            except Exception:
-                                # If anything goes wrong during renumbering, fall back to original content
-                                pass
-                            fn_msg = Message(role=FUNCTION,
-                                             name=tool_name,
-                                             content=tool_result,
-                                             extra={'function_id': out.extra.get('function_id', '1')})
-                            
-                            messages.append(fn_msg)
-                            response.append(fn_msg)
-                            yield response
-                            used_any_tool = True
+                
+                elif search_tool_calls:
+                    # Execute all tools in parallel
+                    parallel_results = self._execute_tools_parallel(search_tool_calls, messages, **kwargs)
+                    
+                    # Process results in the original order
+                    for (out, tool_name, tool_args), tool_result in zip(search_tool_calls, parallel_results):
+                        # Renumber <source id="..."> blocks to be globally unique within this run
+                        try:
+                            tool_result, inc = self._renumber_source_blocks(tool_result, start_index=global_source_id_counter + 1)
+                            global_source_id_counter += inc
+                        except Exception:
+                            # If anything goes wrong during renumbering, fall back to original content
+                            pass
+                        fn_msg = Message(role=FUNCTION,
+                                            name=tool_name,
+                                            content=tool_result,
+                                            extra={'function_id': out.extra.get('function_id', '1')})
+                        
+                        messages.append(fn_msg)
+                        response.append(fn_msg)
+                        yield response
+                        used_any_tool = True
                 if not used_any_tool:
                     break
         yield response
+
+    def _execute_tools_parallel(self, tool_calls: List[tuple], messages: List[Message], **kwargs) -> List[str]:
+        """并行执行工具调用"""
+        if not tool_calls:
+            return []
+        
+        def execute_single_tool(tool_call_info):
+            """执行单个工具调用"""
+            out, tool_name, tool_args = tool_call_info
+            try:
+                return self._call_tool(tool_name, tool_args, messages=messages, **kwargs)
+            except Exception as e:
+                # 如果工具调用失败，返回错误信息
+                return f"工具 {tool_name} 调用失败: {str(e)}"
+        
+        # 使用线程池并行执行工具调用
+        with ThreadPoolExecutor(max_workers=min(len(tool_calls), 8)) as executor:  # 限制最大并发数为8
+            # 提交所有任务并保持顺序
+            future_to_index = {executor.submit(execute_single_tool, tool_call): i 
+                              for i, tool_call in enumerate(tool_calls)}
+            
+            # 初始化结果列表
+            results = [None] * len(tool_calls)
+            
+            # 收集结果，保持原始顺序
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                try:
+                    result = future.result()
+                    results[index] = result
+                except Exception as e:
+                    # 处理异常情况
+                    tool_name = tool_calls[index][1]
+                    results[index] = f"工具 {tool_name} 执行异常: {str(e)}"
+            
+            return results
 
     def _renumber_source_blocks(self, text: str, start_index: int) -> tuple[str, int]:
         """Renumber <source id="n"> blocks so that ids are globally unique.
